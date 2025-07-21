@@ -1,4 +1,3 @@
-// === 📁 src/screens/SignUpScreen.tsx ===
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -11,7 +10,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { register, googleLogin } from '../api/api';
+import { registerUser, googleLogin } from '../api/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Font from 'expo-font';
 import * as AuthSession from 'expo-auth-session';
@@ -19,7 +18,6 @@ import { GOOGLE_CLIENT_ID } from '../utils/constants';
 
 const SignUpScreen = () => {
   const navigation = useNavigation();
-
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password1, setPassword1] = useState('');
@@ -33,14 +31,13 @@ const SignUpScreen = () => {
     password2: false,
   });
 
-  const loadFonts = async () => {
-    await Font.loadAsync({
-      'NotoSans-Regular': require('../../assets/fonts/SpaceMono-Regular.ttf'),
-    });
-    setFontsLoaded(true);
-  };
-
   useEffect(() => {
+    async function loadFonts() {
+      await Font.loadAsync({
+        'NotoSans-Regular': require('../../assets/fonts/SpaceMono-Regular.ttf'),
+      });
+      setFontsLoaded(true);
+    }
     loadFonts();
   }, []);
 
@@ -61,7 +58,6 @@ const SignUpScreen = () => {
       password1: false,
       password2: false,
     };
-
     let validationErrors = [];
 
     if (!username) {
@@ -108,65 +104,47 @@ const SignUpScreen = () => {
 
     try {
       setLoading(true);
-      await register(username, email, password1, password2);
+      const res = await registerUser({ username, email, password: password1, password2 });
+      console.log('Register Response:', res);
       setLoading(false);
       Alert.alert('Success', 'Account created! Check your email to verify.');
-      navigation.navigate('VerifyEmail');
+      navigation.navigate('VerifyEmail', { email }); // Pass email to VerifyEmailScreen
     } catch (err) {
-      console.error(err.response?.data || err.message);
+      console.error('Register Error:', {
+        message: err.message,
+        response: err.response?.data,
+        status: err.response?.status,
+      });
       setLoading(false);
-
-      let errorMessages = [];
-
+      let errorMessage = 'Registration failed. Please check your details.';
       if (err.response?.data) {
-        const data = err.response.data;
-        if (data.username) {
-          errorMessages.push(`Username: ${data.username.join(' ')}`);
-        }
-        if (data.email) {
-          errorMessages.push(`Email: ${data.email.join(' ')}`);
-        }
-        if (data.password1) {
-          errorMessages.push(`Password: ${data.password1.join(' ')}`);
-        }
-        if (data.non_field_errors) {
-          errorMessages.push(data.non_field_errors.join('\n'));
-        }
+        errorMessage = Object.values(err.response.data).flat().join(' ');
+      } else if (err.detail) {
+        errorMessage = err.detail;
       }
-
-      if (errorMessages.length === 0) {
-        errorMessages.push('Registration failed. Please check your details.');
-      }
-
-      Alert.alert('Registration Failed', errorMessages.join('\n'));
+      Alert.alert('Registration Failed', errorMessage);
     }
   };
 
   const handleGoogleLogin = async () => {
     try {
       setLoading(true);
-
-      const redirectUri = AuthSession.makeRedirectUri({
-        useProxy: true,
+      const redirectUri = AuthSession.makeRedirectUri({ scheme: 'myecommerceapp' });
+      const authRequest = await AuthSession.loadAsync({
+        clientId: GOOGLE_CLIENT_ID,
+        redirectUri,
+        scopes: ['profile', 'email'],
+        responseType: 'id_token',
       });
 
-      const authUrl =
-        `https://accounts.google.com/o/oauth2/v2/auth` +
-        `?client_id=${GOOGLE_CLIENT_ID}` +
-        `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-        `&response_type=token` +
-        `&scope=profile email`;
-
-      const result = await AuthSession.startAsync({ authUrl });
-
+      const result = await authRequest.promptAsync({ useProxy: false });
       if (result.type === 'success') {
-        const idToken = result.params.access_token;
+        const idToken = result.params.id_token;
         const res = await googleLogin(idToken);
-
+        console.log('Google Login Response:', res);
         await AsyncStorage.setItem('access_token', res.data.access);
         await AsyncStorage.setItem('refresh_token', res.data.refresh);
         await AsyncStorage.setItem('user_id', res.data.user.id.toString());
-
         setLoading(false);
         Alert.alert('Success', 'Logged in with Google!');
         navigation.replace('Profile');
@@ -175,7 +153,11 @@ const SignUpScreen = () => {
         Alert.alert('Google Login Cancelled');
       }
     } catch (err) {
-      console.error(err.response?.data || err.message);
+      console.error('Google Login Error:', {
+        message: err.message,
+        response: err.response?.data,
+        status: err.response?.status,
+      });
       setLoading(false);
       Alert.alert('Google Login Failed', 'Try again.');
     }
@@ -273,8 +255,6 @@ const SignUpScreen = () => {
   );
 };
 
-export default SignUpScreen;
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -337,3 +317,5 @@ const styles = StyleSheet.create({
     fontFamily: 'NotoSans-Regular',
   },
 });
+
+export default SignUpScreen;

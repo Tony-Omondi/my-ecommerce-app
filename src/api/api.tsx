@@ -1,4 +1,3 @@
-// constants/api.ts
 import axios from "axios";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
@@ -9,7 +8,7 @@ const api = axios.create({
   headers: {
     "Content-Type": "application/json",
   },
-  timeout: 10000, // Added timeout to prevent hanging
+  timeout: 10000,
 });
 
 // Add access token from AsyncStorage
@@ -25,14 +24,53 @@ api.interceptors.request.use(async (config) => {
 export const login = (data: { email: string; password: string }) =>
   api.post("/accounts/login/", data);
 
-export const registerUser = async (userData: {
+export const registerUser = async (data: {
   username: string;
   email: string;
   password: string;
   password2: string;
 }) => {
   try {
-    const response = await api.post("/accounts/register/", userData);
+    const response = await api.post("/accounts/register/", data);
+    return response.data;
+  } catch (error: any) {
+    if (error.response) {
+      throw error.response.data;
+    } else {
+      throw { detail: "Network error or server not reachable." };
+    }
+  }
+};
+
+export const verifyEmail = async (data: { email: string; code: string }) => {
+  try {
+    const response = await api.post("/accounts/verify-email/", data);
+    return response.data;
+  } catch (error: any) {
+    if (error.response) {
+      throw error.response.data;
+    } else {
+      throw { detail: "Network error or server not reachable." };
+    }
+  }
+};
+
+export const resendVerificationCode = async (data: { email: string }) => {
+  try {
+    const response = await api.post("/accounts/forgot-password/", data);
+    return response.data;
+  } catch (error: any) {
+    if (error.response) {
+      throw error.response.data;
+    } else {
+      throw { detail: "Network error or server not reachable." };
+    }
+  }
+};
+
+export const googleLogin = async (idToken: string) => {
+  try {
+    const response = await api.post("/auth/social/google/", { access_token: idToken });
     return response.data;
   } catch (error: any) {
     if (error.response) {

@@ -1,4 +1,3 @@
-// === 📁 src/screens/VerifyEmailScreen.tsx ===
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -9,13 +8,15 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import * as Font from 'expo-font';
 import { verifyEmail, resendVerificationCode } from '../api/api';
 
 const VerifyEmailScreen = () => {
   const navigation = useNavigation();
-  const [verificationCode, setVerificationCode] = useState('');
+  const route = useRoute();
+  const { email } = route.params || {};
+  const [code, setCode] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [fontsLoaded, setFontsLoaded] = useState(false);
@@ -31,33 +32,38 @@ const VerifyEmailScreen = () => {
   }, []);
 
   const handleVerifyEmail = async () => {
-    if (!verificationCode) {
+    if (!email) {
+      setError('Email is required. Please go back and try again.');
+      Alert.alert('Error', 'Email is required. Please go back and try again.');
+      return;
+    }
+    if (!code) {
       setError('Verification code is required');
+      Alert.alert('Error', 'Verification code is required');
       return;
     }
 
     try {
       setLoading(true);
-      const response = await verifyEmail({
-        verification_code: verificationCode,
-      });
+      const res = await verifyEmail({ email, code });
+      console.log('Verify Email Response:', res);
       setLoading(false);
-      Alert.alert(
-        'Success',
-        response.data.message || 'Email verified successfully!'
-      );
+      Alert.alert('Success', res.message || 'Email verified successfully!');
       navigation.navigate('Login');
     } catch (err) {
       setLoading(false);
-      console.error(err.response?.data || err.message);
+      console.error('Verify Email Error:', {
+        message: err.message,
+        response: err.response?.data,
+        status: err.response?.status,
+      });
       let errorMessage = 'Verification failed. Please check the code.';
-      const data = err.response?.data;
-      if (data?.error) {
-        errorMessage = data.error;
-      } else if (data?.detail) {
-        errorMessage = data.detail;
-      } else if (typeof data === 'object') {
-        errorMessage = Object.values(data).flat().join('\n');
+      if (err.response?.data?.error) {
+        errorMessage = err.response.data.error;
+      } else if (err.response?.data) {
+        errorMessage = Object.values(err.response.data).flat().join(' ');
+      } else if (err.detail) {
+        errorMessage = err.detail;
       }
       setError(errorMessage);
       Alert.alert('Verification Failed', errorMessage);
@@ -65,18 +71,30 @@ const VerifyEmailScreen = () => {
   };
 
   const handleResendCode = async () => {
+    if (!email) {
+      Alert.alert('Error', 'Email is required. Please go back and try again.');
+      return;
+    }
     try {
       setLoading(true);
-      await resendVerificationCode();
+      const res = await resendVerificationCode({ email });
+      console.log('Resend Code Response:', res);
       setLoading(false);
-      Alert.alert('Success', 'A new code has been sent to your email.');
+      Alert.alert('Success', res.message || 'A new code has been sent to your email.');
     } catch (err) {
       setLoading(false);
-      console.error(err.response?.data || err.message);
-      Alert.alert(
-        'Error',
-        'Could not resend verification code. Try again.'
-      );
+      console.error('Resend Code Error:', {
+        message: err.message,
+        response: err.response?.data,
+        status: err.response?.status,
+      });
+      let errorMessage = 'Could not resend verification code. Try again.';
+      if (err.response?.data?.error) {
+        errorMessage = err.response.data.error;
+      } else if (err.response?.data) {
+        errorMessage = Object.values(err.response.data).flat().join(' ');
+      }
+      Alert.alert('Error', errorMessage);
     }
   };
 
@@ -92,16 +110,16 @@ const VerifyEmailScreen = () => {
     <View style={styles.container}>
       <Text style={styles.title}>Verify Your Email</Text>
       <Text style={styles.instruction}>
-        Please enter the verification code sent to your email.
+        Please enter the verification code sent to {email || 'your email'}.
       </Text>
 
       <TextInput
         placeholder="Verification Code"
         style={[styles.input, error && styles.inputError]}
         placeholderTextColor="#9bbfaa"
-        value={verificationCode}
+        value={code}
         onChangeText={(text) => {
-          setVerificationCode(text);
+          setCode(text);
           setError('');
         }}
         keyboardType="numeric"
@@ -113,9 +131,9 @@ const VerifyEmailScreen = () => {
       <TouchableOpacity
         style={[
           styles.button,
-          (!verificationCode || loading) && { opacity: 0.5 },
+          (!code || loading || !email) && { opacity: 0.5 },
         ]}
-        disabled={!verificationCode || loading}
+        disabled={!code || loading || !email}
         onPress={handleVerifyEmail}
       >
         {loading ? (
@@ -128,15 +146,13 @@ const VerifyEmailScreen = () => {
       <TouchableOpacity
         style={styles.linkButton}
         onPress={handleResendCode}
-        disabled={loading}
+        disabled={loading || !email}
       >
         <Text style={styles.linkText}>Resend Code</Text>
       </TouchableOpacity>
     </View>
   );
 };
-
-export default VerifyEmailScreen;
 
 const styles = StyleSheet.create({
   container: {
@@ -214,3 +230,5 @@ const styles = StyleSheet.create({
     fontFamily: 'NotoSans-Regular',
   },
 });
+
+export default VerifyEmailScreen;

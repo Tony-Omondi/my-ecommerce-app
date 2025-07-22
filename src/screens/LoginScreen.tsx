@@ -69,7 +69,7 @@ const LoginScreen = () => {
       await AsyncStorage.setItem('refresh_token', res.data.refresh);
       await AsyncStorage.setItem('user_id', res.data.user.id.toString());
       Alert.alert('Success', 'Logged in successfully!');
-      navigation.replace('Profile');
+      navigation.replace('Home');
     } catch (err) {
       console.error(err.response?.data || err.message);
       let errorMessage = 'Check your credentials';

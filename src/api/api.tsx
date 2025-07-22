@@ -1,7 +1,7 @@
 import axios from "axios";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const API_BASE_URL = "http://192.168.88.85:8000/api"; // Use http://10.0.2.2:8000 for Android Emulator
+const API_BASE_URL = "http://192.168.100.63:8000/api"; // Use http://10.0.2.2:8000 for Android Emulator
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -68,19 +68,6 @@ export const resendVerificationCode = async (data: { email: string }) => {
   }
 };
 
-export const googleLogin = async (idToken: string) => {
-  try {
-    const response = await api.post("/auth/social/google/", { access_token: idToken });
-    return response.data;
-  } catch (error: any) {
-    if (error.response) {
-      throw error.response.data;
-    } else {
-      throw { detail: "Network error or server not reachable." };
-    }
-  }
-};
-
 export const forgotPassword = async (data: { email: string }) => {
   try {
     const response = await api.post("/accounts/forgot-password/", data);
@@ -133,8 +120,23 @@ export const deleteShippingAddress = (id: number) =>
 
 // --- PRODUCTS ---
 export const getProducts = () => api.get("/products/");
+
 export const getProduct = (id: number) => api.get(`/products/${id}/`);
-export const getCategories = () => api.get("/products/categories/");
+
+export const getCategories = async () => {
+  try {
+    const response = await api.get("/products/");
+    const products = response.data;
+    const categories = [...new Set(products.map((product) => product.category.name))];
+    return { data: categories };
+  } catch (error: any) {
+    if (error.response) {
+      throw error.response.data;
+    } else {
+      throw { detail: "Network error or server not reachable." };
+    }
+  }
+};
 
 // --- CART & CART ITEMS ---
 export const getCart = () => api.get("/orders/carts/");

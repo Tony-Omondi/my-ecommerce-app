@@ -1,489 +1,520 @@
-// === 📁 src/screens/ProfileScreen.tsx ===
-
 import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  Image,
-  ActivityIndicator,
+import { 
+  View, 
+  Text, 
+  ImageBackground, 
+  ScrollView, 
+  StyleSheet, 
+  TouchableOpacity, 
+  TextInput, 
+  ActivityIndicator, 
   Alert,
-  TextInput,
-  ScrollView,
-  Platform,
+  Platform 
 } from 'react-native';
+import { useFonts } from 'expo-font';
+import { MaterialCommunityIcons, MaterialIcons, FontAwesome } from '@expo/vector-icons';
+import { PaperProvider } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
-import { Ionicons } from '@expo/vector-icons';
-import {
-  getProfileByUserId,
-  updateProfile,
-  createProfile,
-  getUser,
-} from '../api/api';
-import * as Font from 'expo-font';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import moment from 'moment';
+import api from '../api/api';
 
-interface User {
-  id: number;
-  username: string;
-  email: string;
-}
+const DEFAULT_PROFILE_IMAGE = 'https://lh3.googleusercontent.com/aida-public/AB6AXuCjXaep4YWGSofwXSpAbShAlbJk_-PgRKho8W-oLCDOjrmfsQNNDSJPay4ITkp7g29aUPwXX50CFYchjrd9-T52UEj7IB9-iNroHJ7Y09GfDN6SVE0T-BHePmDNPsox6jtKnrIF54vCpSZVFc9N2BnxSt8doU1mzcFpCdPPYk1qBt7-Wq4FGHWRN13n1iSYn6Ah4kDejfwYXzue8eZnKtP0ydVThjYq9Oa6KKkgSKmmJYCL260J7oKR3rGl00QMu4eeysjmBKFFNmL-';
 
-interface Profile {
-  id: number;
-  user: User;
-  bio?: string;
-  location?: string;
-  profile_picture?: string;
-  followers_count?: number;
-  following_count?: number;
-  posts?: any[];
-}
+const getGenderDisplayValue = (code) => {
+  const genders = {
+    'M': 'Male',
+    'F': 'Female',
+    'O': 'Other'
+  };
+  return genders[code] || 'Unknown';
+};
 
-const BACKEND_URL = 'http://your-backend-domain.com';
-
-const ProfileScreen = () => {
+export default function ProfileScreen() {
   const navigation = useNavigation();
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [fontsLoaded, setFontsLoaded] = useState(false);
-  const [editMode, setEditMode] = useState(false);
-  const [formData, setFormData] = useState({
-    bio: '',
-    location: '',
+  const [fontsLoaded] = useFonts({
+    'PlusJakartaSans-Regular': require('../../assets/fonts/NotoSans-Regular.ttf'),
+    'NotoSans-Regular': require('../../assets/fonts/NotoSans-Regular.ttf'),
   });
-  const [pickedImage, setPickedImage] = useState<string | null>(null);
+
+  const [profile, setProfile] = useState({
+    first_name: '',
+    last_name: '',
+    contact_number: '',
+    bio: '',
+    gender: 'M',
+    birthday: '',
+    profile_picture: DEFAULT_PROFILE_IMAGE,
+    username: '',
+  });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [birthdayDate, setBirthdayDate] = useState(new Date());
 
   useEffect(() => {
-    const initialize = async () => {
-      await Font.loadAsync({
-        'NotoSans-Regular': require('../../assets/fonts/NotoSans-Regular.ttf'),
-      });
-      setFontsLoaded(true);
+    const fetchProfile = async () => {
+      try {
+        const response = await api.get('/accounts/profile/');
+        
+        const backendGender = response.data.gender;
+        let frontendGender = 'M';
+        if (backendGender === 'F') frontendGender = 'F';
+        if (backendGender === 'O') frontendGender = 'O';
+        
+        setProfile({
+          first_name: response.data.first_name || '',
+          last_name: response.data.last_name || '',
+          contact_number: response.data.contact_number || '',
+          bio: response.data.bio || '',
+          gender: frontendGender,
+          birthday: response.data.birthday || '',
+          profile_picture: response.data.profile_picture || DEFAULT_PROFILE_IMAGE,
+          username: response.data.user?.username || '@user',
+        });
 
-      if (Platform.OS !== 'web') {
-        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (status !== 'granted') {
-          Alert.alert(
-            'Permission required',
-            'We need camera roll permissions to upload images'
-          );
+        if (response.data.birthday) {
+          const date = moment(response.data.birthday, 'YYYY-MM-DD').toDate();
+          if (!isNaN(date.getTime())) {
+            setBirthdayDate(date);
+          }
         }
+        
+        setLoading(false);
+      } catch (err) {
+        console.error('Profile Fetch Error:', err);
+        setError('Failed to fetch profile');
+        setLoading(false);
       }
-
-      await fetchUserProfile();
     };
-
-    initialize();
+    fetchProfile();
   }, []);
 
-  const fetchUserProfile = async () => {
-    try {
-      setLoading(true);
-      const userIdStr = await AsyncStorage.getItem('user_id');
-      if (!userIdStr) throw new Error('User not logged in');
-      const userId = parseInt(userIdStr, 10);
+  const handleImagePicker = async () => {
+    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    
+    if (!permissionResult.granted) {
+      Alert.alert('Permission required', 'We need camera roll permissions to upload images');
+      return;
+    }
 
-      const res = await getProfileByUserId(userId);
-      console.log('✅ Profile API response:', res.data);
+    const pickerResult = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.5,
+    });
 
+    if (!pickerResult.canceled) {
+      const selectedImage = pickerResult.assets[0].uri;
+      setProfile({ ...profile, profile_picture: selectedImage });
+    }
+  };
+
+  const handleDateChange = (event, selectedDate) => {
+    setShowDatePicker(Platform.OS === 'ios');
+    if (selectedDate) {
+      setBirthdayDate(selectedDate);
       setProfile({
-        ...res.data,
-        user: res.data.user_data,
+        ...profile,
+        birthday: moment(selectedDate).format('YYYY-MM-DD')
       });
-
-      setFormData({
-        bio: res.data.bio || '',
-        location: res.data.location || '',
-      });
-    } catch (err: any) {
-      console.error('Fetch profile error:', err);
-      if (err?.response?.status === 404) {
-        setProfile(null);
-      } else {
-        setError(err.message || 'Failed to load profile.');
-      }
-    } finally {
-      setLoading(false);
     }
   };
 
-  const handleCreateProfile = async () => {
+  const handleUpdateProfile = async () => {
+    setIsSubmitting(true);
     try {
-      setLoading(true);
+      const formData = new FormData();
+      formData.append('first_name', profile.first_name);
+      formData.append('last_name', profile.last_name);
+      formData.append('contact_number', profile.contact_number);
+      formData.append('bio', profile.bio);
+      formData.append('gender', profile.gender);
+      formData.append('birthday', profile.birthday);
 
-      const userIdStr = await AsyncStorage.getItem('user_id');
-      if (!userIdStr) throw new Error('User not logged in');
-      const userId = parseInt(userIdStr, 10);
+      if (profile.profile_picture.startsWith('file://')) {
+        const localUri = profile.profile_picture;
+        const filename = localUri.split('/').pop();
+        const match = /\.(\w+)$/.exec(filename);
+        const type = match ? `image/${match[1]}` : 'image';
 
-      if (pickedImage) {
-        const data = new FormData();
-        data.append('user', String(userId));
-        data.append('bio', formData.bio);
-        data.append('location', formData.location);
-        data.append('profile_picture', {
-          uri: pickedImage,
-          type: 'image/jpeg',
-          name: 'profile.jpg',
+        formData.append('profile_picture', {
+          uri: localUri,
+          name: filename,
+          type,
         } as any);
-
-        const res = await createProfile(data);
-        const userData = await getUser(userId);
-        setProfile({
-          ...res.data,
-          user: userData.data,
-        });
-      } else {
-        const res = await createProfile({
-          user: userId,
-          bio: formData.bio,
-          location: formData.location,
-        });
-        const userData = await getUser(userId);
-        setProfile({
-          ...res.data,
-          user: userData.data,
-        });
       }
 
-      Alert.alert('Success', 'Profile created successfully!');
-      setEditMode(false);
-    } catch (err: any) {
-      console.error('Create profile error:', err?.response || err);
-      Alert.alert('Error', 'Failed to create profile.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSaveProfile = async () => {
-    try {
-      if (!profile) {
-        Alert.alert('Error', 'No profile loaded.');
-        return;
-      }
-
-      setLoading(true);
-
-      if (pickedImage) {
-        const data = new FormData();
-        data.append('bio', formData.bio);
-        data.append('location', formData.location);
-        data.append('profile_picture', {
-          uri: pickedImage,
-          type: 'image/jpeg',
-          name: 'profile.jpg',
-        } as any);
-
-        const response = await updateProfile(profile.id, data);
-        setProfile({
-          ...response.data,
-          user: response.data.user_data || profile.user,
-        });
-      } else {
-        const response = await updateProfile(profile.id, formData);
-        setProfile({
-          ...response.data,
-          user: response.data.user_data || profile.user,
-        });
-      }
-
-      setEditMode(false);
-      Alert.alert('Success', 'Profile updated!');
-    } catch (err: any) {
-      console.error('Save profile error:', err?.response || err);
-      Alert.alert('Error', 'Failed to save profile.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const pickImage = async () => {
-    try {
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 1,
+      const response = await api.put('/accounts/profile/', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
       });
 
-      if (result.canceled || !result.assets?.[0]?.uri) return;
-
-      setPickedImage(result.assets[0].uri);
+      if (response.status === 200) {
+        setProfile({
+          ...profile,
+          profile_picture: response.data.profile_picture || DEFAULT_PROFILE_IMAGE
+        });
+        Alert.alert('Success', 'Profile updated successfully!');
+      }
     } catch (err) {
-      console.error('Image picker error:', err);
-      Alert.alert('Error', 'Failed to pick image.');
+      console.error('Profile Update Error:', err.response?.data);
+      
+      if (err.response?.data) {
+        let errorMessage = 'Please fix the following errors:';
+        Object.entries(err.response.data).forEach(([field, errors]) => {
+          errorMessage += `\n• ${field}: ${Array.isArray(errors) ? errors.join(', ') : errors}`;
+        });
+        setError(errorMessage);
+      } else {
+        setError(err.message || 'Failed to update profile');
+      }
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   if (!fontsLoaded || loading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#94e0b2" />
-      </View>
-    );
-  }
-
-  if (error) {
-    return (
       <View style={styles.container}>
-        <Text style={styles.errorText}>{error}</Text>
-        <TouchableOpacity style={styles.button} onPress={fetchUserProfile}>
-          <Text style={styles.buttonText}>Retry</Text>
-        </TouchableOpacity>
+        <ActivityIndicator size="large" color="#607afb" />
       </View>
-    );
-  }
-
-  if (!profile) {
-    return (
-      <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.sectionTitle}>Create Your Profile</Text>
-      </ScrollView>
     );
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <View style={styles.profileHeader}>
-        <TouchableOpacity onPress={pickImage}>
-          <Image
-            source={
-              pickedImage
-                ? { uri: pickedImage }
-                : profile.profile_picture
-                ? { uri: profile.profile_picture }
-                : require('../../assets/_.jpeg')
-            }
-            style={styles.profileImage}
-          />
-          <View style={styles.cameraIcon}>
-            <Ionicons name="camera" size={20} color="white" />
-          </View>
-        </TouchableOpacity>
-        <Text style={styles.username}>{profile.user?.username}</Text>
-        <Text style={styles.email}>{profile.user?.email}</Text>
+    <PaperProvider>
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()}>
+            <MaterialIcons name="arrow-back" size={24} color="#0d0f1c" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Profile</Text>
+          <View style={{ width: 24 }} />
+        </View>
 
-        <View style={styles.statsRow}>
-          <View style={styles.statItem}>
-            <Text style={styles.statNumber}>
-              {profile.followers_count ?? 0}
-            </Text>
-            <Text style={styles.statLabel}>Followers</Text>
+        <ScrollView style={styles.scrollView}>
+          <View style={styles.profileSection}>
+            <TouchableOpacity onPress={handleImagePicker}>
+              <ImageBackground
+                source={{ uri: profile.profile_picture }}
+                style={styles.profileImage}
+              >
+                <View style={styles.cameraIcon}>
+                  <MaterialIcons name="photo-camera" size={24} color="white" />
+                </View>
+              </ImageBackground>
+            </TouchableOpacity>
+            <Text style={styles.profileName}>{profile.first_name} {profile.last_name}</Text>
+            <Text style={styles.profileUsername}>{profile.username}</Text>
+            <Text style={styles.profileGender}>{getGenderDisplayValue(profile.gender)}</Text>
           </View>
-          <View style={styles.statItem}>
-            <Text style={styles.statNumber}>
-              {profile.following_count ?? 0}
-            </Text>
-            <Text style={styles.statLabel}>Following</Text>
+
+          <View style={styles.formContainer}>
+            {error && <Text style={styles.errorText}>{error}</Text>}
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>First Name</Text>
+              <TextInput
+                style={styles.input}
+                value={profile.first_name}
+                onChangeText={(text) => setProfile({ ...profile, first_name: text })}
+                placeholder="Enter first name"
+                placeholderTextColor="#47569e"
+              />
+            </View>
+
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>Last Name</Text>
+              <TextInput
+                style={styles.input}
+                value={profile.last_name}
+                onChangeText={(text) => setProfile({ ...profile, last_name: text })}
+                placeholder="Enter last name"
+                placeholderTextColor="#47569e"
+              />
+            </View>
+
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>Contact Number</Text>
+              <TextInput
+                style={styles.input}
+                value={profile.contact_number}
+                onChangeText={(text) => setProfile({ ...profile, contact_number: text })}
+                placeholder="Enter contact number"
+                placeholderTextColor="#47569e"
+                keyboardType="phone-pad"
+              />
+            </View>
+
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>Bio</Text>
+              <TextInput
+                style={[styles.input, styles.bioInput]}
+                value={profile.bio}
+                onChangeText={(text) => setProfile({ ...profile, bio: text })}
+                placeholder="Tell us about yourself"
+                placeholderTextColor="#47569e"
+                multiline
+              />
+            </View>
+
+            <View style={styles.radioGroup}>
+              <TouchableOpacity 
+                style={[styles.radioOption, profile.gender === 'M' && styles.radioOptionSelected]}
+                onPress={() => setProfile({ ...profile, gender: 'M' })}
+              >
+                <View style={styles.radioCircle}>
+                  {profile.gender === 'M' && <View style={styles.radioDot} />}
+                </View>
+                <Text style={styles.radioLabel}>Male</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={[styles.radioOption, profile.gender === 'F' && styles.radioOptionSelected]}
+                onPress={() => setProfile({ ...profile, gender: 'F' })}
+              >
+                <View style={styles.radioCircle}>
+                  {profile.gender === 'F' && <View style={styles.radioDot} />}
+                </View>
+                <Text style={styles.radioLabel}>Female</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={[styles.radioOption, profile.gender === 'O' && styles.radioOptionSelected]}
+                onPress={() => setProfile({ ...profile, gender: 'O' })}
+              >
+                <View style={styles.radioCircle}>
+                  {profile.gender === 'O' && <View style={styles.radioDot} />}
+                </View>
+                <Text style={styles.radioLabel}>Other</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>Birthday</Text>
+              <TouchableOpacity 
+                style={styles.input}
+                onPress={() => setShowDatePicker(true)}
+              >
+                <Text style={styles.dateText}>
+                  {profile.birthday ? moment(profile.birthday).format('MMMM D, YYYY') : 'Select your birthday'}
+                </Text>
+              </TouchableOpacity>
+              {showDatePicker && (
+                <DateTimePicker
+                  value={birthdayDate}
+                  mode="date"
+                  display="default"
+                  onChange={handleDateChange}
+                  maximumDate={new Date()}
+                />
+              )}
+            </View>
+
+            <TouchableOpacity 
+              style={[styles.updateButton, isSubmitting && styles.updateButtonDisabled]}
+              onPress={handleUpdateProfile}
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? (
+                <ActivityIndicator color="#f8f9fc" />
+              ) : (
+                <Text style={styles.updateButtonText}>Update Profile</Text>
+              )}
+            </TouchableOpacity>
           </View>
-          <View style={styles.statItem}>
-            <Text style={styles.statNumber}>
-              {profile.posts?.length ?? 0}
-            </Text>
-            <Text style={styles.statLabel}>Posts</Text>
-          </View>
+        </ScrollView>
+
+        <View style={styles.bottomNav}>
+          <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('Home')}>
+            <MaterialCommunityIcons name="home-outline" size={24} color="#47569e" />
+            <Text style={styles.navText}>Home</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('Cart')}>
+            <MaterialCommunityIcons name="cart-outline" size={24} color="#47569e" />
+            <Text style={styles.navText}>Cart</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('Notifications')}>
+            <MaterialIcons name="notifications-none" size={24} color="#47569e" />
+            <Text style={styles.navText}>Notification</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.navItem}>
+            <FontAwesome name="user" size={20} color="#0d0f1c" />
+            <Text style={[styles.navText, { color: '#0d0f1c' }]}>Profile</Text>
+          </TouchableOpacity>
         </View>
       </View>
-
-      <View style={styles.profileSection}>
-        <Text style={styles.sectionTitle}>Bio</Text>
-        {editMode ? (
-          <TextInput
-            style={styles.input}
-            value={formData.bio}
-            onChangeText={(text) =>
-              setFormData({ ...formData, bio: text })
-            }
-            placeholder="Tell about yourself"
-            placeholderTextColor="#aaa"
-            multiline
-          />
-        ) : (
-          <Text style={styles.sectionContent}>
-            {profile.bio || 'No bio added yet.'}
-          </Text>
-        )}
-      </View>
-
-      <View style={styles.profileSection}>
-        <Text style={styles.sectionTitle}>Location</Text>
-        {editMode ? (
-          <TextInput
-            style={styles.input}
-            value={formData.location}
-            onChangeText={(text) =>
-              setFormData({ ...formData, location: text })
-            }
-            placeholder="Your location"
-            placeholderTextColor="#aaa"
-          />
-        ) : (
-          <Text style={styles.sectionContent}>
-            {profile.location || 'No location added yet.'}
-          </Text>
-        )}
-      </View>
-
-      <View style={styles.buttonGroup}>
-        {editMode ? (
-          <>
-            <TouchableOpacity
-              style={[styles.button, styles.saveButton]}
-              onPress={handleSaveProfile}
-            >
-              <Text style={styles.buttonText}>Save Changes</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.button, styles.cancelButton]}
-              onPress={() => {
-                setEditMode(false);
-                setPickedImage(null);
-              }}
-            >
-              <Text style={styles.buttonText}>Cancel</Text>
-            </TouchableOpacity>
-          </>
-        ) : (
-          <TouchableOpacity
-            style={[styles.button, styles.editButton]}
-            onPress={() => setEditMode(true)}
-          >
-            <Text style={styles.buttonText}>Edit Profile</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-    </ScrollView>
+    </PaperProvider>
   );
-};
+}
 
 const styles = StyleSheet.create({
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#141f18',
-  },
   container: {
-    flexGrow: 1,
-    backgroundColor: '#141f18',
-    padding: 20,
+    flex: 1,
+    backgroundColor: '#f8f9fc',
   },
-  profileHeader: {
-    alignItems: 'center',
-    marginBottom: 30,
-  },
-  profileImage: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    borderWidth: 2,
-    borderColor: '#94e0b2',
-  },
-  cameraIcon: {
-    position: 'absolute',
-    right: 5,
-    bottom: 5,
-    backgroundColor: '#94e0b2',
-    borderRadius: 15,
-    padding: 5,
-  },
-  username: {
-    color: '#94e0b2',
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginTop: 10,
-    fontFamily: 'NotoSans-Regular',
-  },
-  email: {
-    color: '#ffffff',
-    fontSize: 16,
-    marginTop: 5,
-    fontFamily: 'NotoSans-Regular',
-  },
-  statsRow: {
+  header: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
-    width: '100%',
-    marginTop: 20,
-  },
-  statItem: {
     alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    paddingBottom: 8,
+    backgroundColor: '#f8f9fc',
   },
-  statNumber: {
-    color: '#ffffff',
+  headerTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    fontFamily: 'NotoSans-Regular',
+    color: '#0d0f1c',
+    textAlign: 'center',
+    flex: 1,
+    marginRight: 24,
   },
-  statLabel: {
-    color: '#94e0b2',
-    fontSize: 14,
-    fontFamily: 'NotoSans-Regular',
+  scrollView: {
+    flex: 1,
   },
   profileSection: {
-    marginBottom: 20,
+    alignItems: 'center',
+    padding: 16,
   },
-  sectionTitle: {
-    color: '#94e0b2',
-    fontSize: 18,
+  profileImage: {
+    width: 128,
+    height: 128,
+    borderRadius: 64,
+    marginBottom: 16,
+    overflow: 'hidden',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cameraIcon: {
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 64,
+  },
+  profileName: {
+    fontSize: 22,
     fontWeight: 'bold',
-    marginBottom: 8,
-    fontFamily: 'NotoSans-Regular',
+    color: '#0d0f1c',
+    marginBottom: 4,
   },
-  sectionContent: {
-    color: '#ffffff',
+  profileUsername: {
     fontSize: 16,
-    fontFamily: 'NotoSans-Regular',
-    padding: 10,
-    backgroundColor: '#1e2b22',
-    borderRadius: 8,
+    color: '#47569e',
+    marginBottom: 4,
+  },
+  profileGender: {
+    fontSize: 16,
+    color: '#47569e',
+  },
+  formContainer: {
+    paddingHorizontal: 16,
+  },
+  inputContainer: {
+    marginBottom: 12,
+  },
+  inputLabel: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#0d0f1c',
+    marginBottom: 8,
   },
   input: {
-    color: '#ffffff',
+    backgroundColor: '#e6e9f4',
+    borderRadius: 12,
+    padding: 16,
     fontSize: 16,
-    fontFamily: 'NotoSans-Regular',
-    padding: 10,
-    backgroundColor: '#1e2b22',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#94e0b2',
+    color: '#0d0f1c',
+    height: 56,
   },
-  buttonGroup: {
-    width: '100%',
-    marginTop: 20,
+  dateText: {
+    fontSize: 16,
+    color: '#0d0f1c',
   },
-  button: {
-    padding: 15,
-    borderRadius: 8,
+  bioInput: {
+    height: 144,
+    textAlignVertical: 'top',
+  },
+  radioGroup: {
+    marginVertical: 12,
+  },
+  radioOption: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#ced2e9',
+    borderRadius: 12,
+    padding: 15,
+    marginBottom: 8,
   },
-  editButton: {
-    backgroundColor: '#94e0b2',
+  radioOptionSelected: {
+    borderColor: '#607afb',
   },
-  saveButton: {
-    backgroundColor: '#4CAF50',
+  radioCircle: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: '#ced2e9',
+    marginRight: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  cancelButton: {
-    backgroundColor: '#f44336',
+  radioDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#607afb',
   },
-  buttonText: {
-    color: '#ffffff',
-    fontWeight: 'bold',
+  radioLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#0d0f1c',
+  },
+  updateButton: {
+    backgroundColor: '#607afb',
+    borderRadius: 24,
+    height: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginVertical: 16,
+  },
+  updateButtonDisabled: {
+    backgroundColor: '#a0b4ff',
+  },
+  updateButtonText: {
+    color: '#f8f9fc',
     fontSize: 16,
-    fontFamily: 'NotoSans-Regular',
+    fontWeight: 'bold',
   },
   errorText: {
-    color: '#ff4d4f',
     fontSize: 16,
-    marginBottom: 16,
+    color: '#ff0000',
     textAlign: 'center',
-    fontFamily: 'NotoSans-Regular',
+    marginBottom: 16,
+  },
+  bottomNav: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e6e9f4',
+    backgroundColor: '#f8f9fc',
+  },
+  navItem: {
+    alignItems: 'center',
+    padding: 8,
+  },
+  navText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#47569e',
+    marginTop: 4,
   },
 });
-
-export default ProfileScreen;

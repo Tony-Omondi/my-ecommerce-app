@@ -1,582 +1,427 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
-  StyleSheet,
-  ActivityIndicator,
   Text,
+  FlatList,
+  StyleSheet,
   TouchableOpacity,
+  ActivityIndicator,
   Alert,
-  Animated,
-  Dimensions,
-  Platform,
-  SafeAreaView,
-  StatusBar
 } from 'react-native';
-import { WebView } from 'react-native-webview';
-import { useNavigation, useRoute } from '@react-navigation/native';
-import * as Font from 'expo-font';
-import { Ionicons, MaterialIcons } from '@expo/vector-icons';
-import { verifyPayment } from '../api/api';
-import { LinearGradient } from 'expo-linear-gradient';
+import { useFonts } from 'expo-font';
+import { MaterialIcons } from '@expo/vector-icons';
+import { PaperProvider } from 'react-native-paper';
+import { useNavigation } from '@react-navigation/native';
+import { getCartItems, initiatePayment, getShippingAddresses } from '../api/api';
+import WebView from 'react-native-webview';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-const isSmallDevice = SCREEN_WIDTH < 375;
+// Base URL for images
+const IMAGE_BASE_URL = 'http://192.168.88.85:8000'; // Use http://10.0.2.2:8000 for Android Emulator
 
 const CheckoutScreen = () => {
   const navigation = useNavigation();
-  const route = useRoute();
-  const { 
-    authorizationUrl, 
-    reference, 
-    cartId, 
-    total, 
-    callbackUrl 
-  } = route.params || {};
+  const [cartItems, setCartItems] = useState([]);
+  const [shippingAddresses, setShippingAddresses] = useState([]);
+  const [selectedAddress, setSelectedAddress] = useState(null);
+  const [subtotal, setSubtotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [paymentLoading, setPaymentLoading] = useState(false);
+  const [paymentUrl, setPaymentUrl] = useState(null);
+  const [error, setError] = useState(null);
 
-  const [fontsLoaded, setFontsLoaded] = useState(false);
-  const [webViewVisible, setWebViewVisible] = useState(false);
-  const [webViewError, setWebViewError] = useState(null);
-  const [progress, setProgress] = useState(0);
-  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const [fontsLoaded] = useFonts({
+    'PlusJakartaSans-Regular': require('../../assets/fonts/NotoSans-Regular.ttf'),
+    'NotoSans-Regular': require('../../assets/fonts/NotoSans-Regular.ttf'),
+  });
 
-  // Animation for header
-  const headerTranslateY = useRef(new Animated.Value(0)).current;
-  const headerHeight = useRef(new Animated.Value(80)).current;
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      // Fetch cart items
+      const cartResponse = await getCartItems();
+      const fixedItems = cartResponse.data.map((item) => ({
+        ...item,
+        product: {
+          ...item.product,
+          images: item.product.images?.map((img) => ({
+            ...img,
+            image: img.image.startsWith('/media')
+              ? `${IMAGE_BASE_URL}${img.image}`
+              : img.image,
+          })) || [],
+        },
+      }));
+      setCartItems(fixedItems);
+      const total = fixedItems.reduce(
+        (sum, item) => sum + parseFloat(item.product.price) * item.quantity,
+        0
+      );
+      setSubtotal(total);
+
+      // Fetch shipping addresses
+      const addressResponse = await getShippingAddresses();
+      setShippingAddresses(addressResponse.data);
+      const defaultAddress = addressResponse.data.find((addr) => addr.current_address);
+      setSelectedAddress(defaultAddress || addressResponse.data[0] || null);
+
+      setLoading(false);
+    } catch (err) {
+      console.error('Checkout Fetch Error:', {
+        message: err.message,
+        response: err.response?.data,
+        status: err.response?.status,
+      });
+      setError('Failed to load checkout data. Please try again.');
+      setLoading(false);
+      Alert.alert('Error', 'Failed to load checkout data. Please check your connection.');
+    }
+  };
 
   useEffect(() => {
-    const loadFonts = async () => {
-      try {
-        await Font.loadAsync({
-          'NotoSans-Regular': require('../../assets/fonts/NotoSans-Regular.ttf'),
-          'NotoSans-SemiBold': require('../../assets/fonts/NotoSans-Regular.ttf'),
-          'NotoSans-Bold': require('../../assets/fonts/NotoSans-Regular.ttf'),
-        });
-        
-        // Fade in animation
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 300,
-          useNativeDriver: true,
-        }).start();
-        
-        setFontsLoaded(true);
-        setWebViewVisible(true);
-      } catch (error) {
-        console.error('Error loading fonts:', error);
-        showErrorAlert('Failed to load fonts');
-        setFontsLoaded(true);
-      }
-    };
-
-    loadFonts();
+    fetchData();
   }, []);
 
-  const showErrorAlert = (message) => {
-    Alert.alert(
-      'Payment Error',
-      message,
-      [
-        { 
-          text: 'OK', 
-          onPress: () => navigation.goBack(),
-          style: 'cancel'
-        }
-      ],
-      { cancelable: false }
-    );
-  };
-
-  const showSuccessAlert = (orderId) => {
-    Alert.alert(
-      '🎉 Payment Successful',
-      'Your payment was processed successfully!',
-      [
-        { 
-          text: 'Continue Shopping', 
-          onPress: () => navigation.replace('Home'),
-          style: 'cancel'
-        },
-        { 
-          text: 'View Order', 
-          onPress: () => navigation.replace('OrderDetail', { orderId }),
-          style: 'default'
-        }
-      ]
-    );
-  };
-
-  const handleNavigationStateChange = async (navState) => {
-    const { url, loading } = navState;
-
-    // Update progress bar based on loading state
-    if (loading) {
-      setProgress(0.3);
-      Animated.timing(headerTranslateY, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: true,
-      }).start();
-    } else {
-      setProgress(1);
-      setTimeout(() => setProgress(0), 500);
+  const handleInitiatePayment = async () => {
+    if (!cartItems.length) {
+      Alert.alert('Error', 'Your cart is empty. Add items to proceed.');
+      return;
     }
-
-    // Handle payment success callback
-    if (isPaymentSuccessUrl(url)) {
-      setWebViewVisible(false);
-      
-      try {
-        const referenceId = extractReferenceFromUrl(url) || reference;
-        if (!referenceId) throw new Error('No reference found in callback URL');
-        
-        const response = await verifyPayment(referenceId);
-        
-        if (response.data?.status === 'success') {
-          showSuccessAlert(response.data.order_id);
-        } else {
-          showErrorAlert(response.data?.error || 'Payment failed. Please try again.');
-        }
-      } catch (error) {
-        console.error('Payment verification failed:', error);
-        showErrorAlert(error.message || 'Payment verification failed');
-      }
+    if (!selectedAddress) {
+      Alert.alert('Error', 'Please select a shipping address.');
+      return;
     }
-  };
-
-  const isPaymentSuccessUrl = (url) => {
-    const successPatterns = [
-      'kibraconnect://payment-callback',
-      'success=true',
-      '/api/marketplace/payments/callback/',
-      'paystack.co/success',
-      'payment/success'
-    ];
-    return successPatterns.some(pattern => url.includes(pattern));
-  };
-
-  const extractReferenceFromUrl = (url) => {
     try {
-      const urlObj = new URL(url);
-      return urlObj.searchParams.get('reference') || 
-             urlObj.searchParams.get('transaction_id') || 
-             reference;
-    } catch {
-      return url.split('reference=')[1]?.split('&')[0] || reference;
+      setPaymentLoading(true);
+      const response = await initiatePayment({ shipping_address_id: selectedAddress.id });
+      if (response.status && response.authorization_url) {
+        setPaymentUrl(response.authorization_url);
+      } else {
+        throw new Error(response.message || 'Payment initialization failed.');
+      }
+    } catch (err) {
+      const errorMessage = err.detail || err.message || 'Failed to initiate payment. Please try again.';
+      console.error('Payment Initiation Error:', {
+        message: err.message,
+        detail: err.detail,
+        response: err.response?.data,
+        status: err.response?.status,
+        stack: err.stack,
+      });
+      Alert.alert('Error', errorMessage);
+      setPaymentLoading(false);
     }
   };
 
-  const handleWebViewError = (syntheticEvent) => {
-    const { nativeEvent } = syntheticEvent;
-    console.error('WebView error:', nativeEvent);
-    
-    setWebViewError(nativeEvent.description);
-    setProgress(0);
-
-    if (nativeEvent.url.includes('/api/marketplace/payments/callback/')) {
-      const referenceId = extractReferenceFromUrl(nativeEvent.url);
-      if (referenceId) {
-        handleNavigationStateChange({ url: nativeEvent.url });
-        return;
+  const handleWebViewNavigation = (navState) => {
+    const { url } = navState;
+    if (url.includes('/api/orders/payment/callback/')) {
+      const reference = new URL(url).searchParams.get('reference');
+      if (reference) {
+        navigation.navigate('OrderConfirmation', { reference });
+        setPaymentUrl(null);
       }
     }
-
-    showErrorAlert(nativeEvent.description || 'Failed to load payment page');
   };
 
-  const renderLoading = () => (
-    <View style={styles.loadingOverlay}>
-      <ActivityIndicator size="large" color="#4CAF50" />
-      <Text style={styles.loadingText}>Securely connecting to payment gateway...</Text>
-    </View>
-  );
-
-  const renderError = () => (
-    <View style={styles.errorContainer}>
-      <View style={styles.errorIconContainer}>
-        <MaterialIcons name="error-outline" size={48} color="#FF5252" />
-      </View>
-      <Text style={styles.errorTitle}>Payment Failed</Text>
-      <Text style={styles.errorMessage}>
-        {webViewError || 'We encountered an issue processing your payment'}
+  const renderCartItem = ({ item }) => (
+    <View style={styles.cartItem}>
+      <Text style={styles.itemName}>{item.product.name}</Text>
+      <Text style={styles.itemVariant}>
+        Size: {item.variant?.size || 'N/A'}, Color: {item.variant?.color || 'N/A'}
       </Text>
-      
-      <View style={styles.buttonGroup}>
-        <TouchableOpacity 
-          style={[styles.actionButton, styles.primaryButton]}
-          onPress={() => setWebViewVisible(true)}
-        >
-          <Text style={styles.buttonText}>Try Again</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={[styles.actionButton, styles.secondaryButton]}
-          onPress={() => navigation.goBack()}
-        >
-          <Text style={[styles.buttonText, styles.secondaryButtonText]}>Back to Cart</Text>
-        </TouchableOpacity>
-      </View>
+      <Text style={styles.itemPrice}>
+        ${parseFloat(item.product.price).toFixed(2)} x {item.quantity} = $
+        {(parseFloat(item.product.price) * item.quantity).toFixed(2)}
+      </Text>
     </View>
   );
 
-  if (!fontsLoaded) {
+  const renderAddressItem = ({ item }) => (
+    <TouchableOpacity
+      style={[styles.addressItem, selectedAddress?.id === item.id && styles.selectedAddress]}
+      onPress={() => setSelectedAddress(item)}
+    >
+      <Text style={styles.addressText}>
+        {item.address}, {item.city}, {item.country}
+      </Text>
+      {item.current_address && <Text style={styles.defaultText}>Default</Text>}
+    </TouchableOpacity>
+  );
+
+  if (!fontsLoaded || loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#4CAF50" />
+        <ActivityIndicator size="large" color="#607afb" />
       </View>
     );
   }
 
-  if (!authorizationUrl || !authorizationUrl.startsWith('https')) {
+  if (error) {
     return (
-      <SafeAreaView style={styles.safeArea}>
-        <View style={styles.invalidContainer}>
-          <View style={styles.invalidIconContainer}>
-            <MaterialIcons name="payment" size={64} color="#FF5252" />
-          </View>
-          <Text style={styles.invalidTitle}>Invalid Payment Link</Text>
-          <Text style={styles.invalidMessage}>
-            The payment URL provided is not valid or secure
-          </Text>
-          
-          <TouchableOpacity 
-            style={[styles.actionButton, styles.secondaryButton]}
-            onPress={() => navigation.goBack()}
-          >
-            <Text style={[styles.buttonText, styles.secondaryButtonText]}>Back to Cart</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
+      <View style={styles.errorContainer}>
+        <Text style={styles.errorText}>{error}</Text>
+        <TouchableOpacity
+          style={styles.retryButton}
+          onPress={() => {
+            setError(null);
+            setLoading(true);
+            fetchData();
+          }}
+        >
+          <Text style={styles.retryButtonText}>Retry</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  if (paymentUrl) {
+    return (
+      <WebView
+        source={{ uri: paymentUrl }}
+        style={styles.webview}
+        onNavigationStateChange={handleWebViewNavigation}
+        startInLoadingState
+        scalesPageToFit
+      />
     );
   }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="light-content" backgroundColor="#0D1F17" />
-      
-      {/* Animated Header */}
-      <Animated.View 
-        style={[
-          styles.header, 
-          { 
-            transform: [{ translateY: headerTranslateY }],
-            height: headerHeight 
-          }
-        ]}
-      >
-        <LinearGradient
-          colors={['#0D1F17', '#1A3A2A']}
-          style={StyleSheet.absoluteFill}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
+    <PaperProvider>
+      <View style={styles.container}>
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()}>
+            <MaterialIcons name="arrow-back" size={24} color="#0d0f1c" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Checkout</Text>
+          <View style={styles.headerPlaceholder} />
+        </View>
+
+        {/* Cart Items */}
+        <Text style={styles.sectionTitle}>Order Summary</Text>
+        <FlatList
+          data={cartItems}
+          renderItem={renderCartItem}
+          keyExtractor={(item) => item.id.toString()}
+          contentContainerStyle={styles.cartList}
         />
-        
-        <TouchableOpacity 
-          onPress={() => navigation.goBack()}
-          style={styles.backButton}
-          activeOpacity={0.7}
-        >
-          <Ionicons name="arrow-back" size={24} color="white" />
-        </TouchableOpacity>
-        
-        <View style={styles.headerContent}>
-          <Text style={styles.headerTitle}>Secure Checkout</Text>
-          <View style={styles.securityIcons}>
-            <Ionicons name="lock-closed" size={18} color="#94e0b2" />
-            <Ionicons 
-              name="shield-checkmark" 
-              size={18} 
-              color="#94e0b2" 
-              style={styles.securityIconSpacing} 
-            />
+
+        {/* Shipping Address */}
+        <Text style={styles.sectionTitle}>Shipping Address</Text>
+        {shippingAddresses.length === 0 ? (
+          <View style={styles.emptyAddressContainer}>
+            <Text style={styles.emptyText}>No addresses found.</Text>
+            <TouchableOpacity
+              style={styles.addAddressButton}
+              onPress={() => navigation.navigate('AddAddress')}
+            >
+              <Text style={styles.addAddressButtonText}>Add Address</Text>
+            </TouchableOpacity>
           </View>
-        </View>
-      </Animated.View>
+        ) : (
+          <FlatList
+            data={shippingAddresses}
+            renderItem={renderAddressItem}
+            keyExtractor={(item) => item.id.toString()}
+            contentContainerStyle={styles.addressList}
+          />
+        )}
 
-      {/* Progress Bar */}
-      {progress > 0 && (
-        <Animated.View 
-          style={[
-            styles.progressBar,
-            { 
-              width: SCREEN_WIDTH * progress,
-              opacity: progress > 0 ? 1 : 0
-            }
-          ]}
-        />
-      )}
-
-      {/* Payment Summary */}
-      <View style={styles.summaryContainer}>
-        <Text style={styles.summaryLabel}>Order Total</Text>
-        <View style={styles.amountContainer}>
-          <Text style={styles.currency}>KSh</Text>
-          <Text style={styles.summaryAmount}>{total.toLocaleString()}</Text>
-        </View>
-      </View>
-
-      {/* Payment Gateway */}
-      {webViewVisible ? (
-        <WebView
-          source={{ uri: authorizationUrl }}
-          style={styles.webview}
-          onNavigationStateChange={handleNavigationStateChange}
-          onError={handleWebViewError}
-          onHttpError={handleWebViewError}
-          startInLoadingState={true}
-          renderLoading={renderLoading}
-          allowsBackForwardNavigationGestures={false}
-          injectedJavaScript={`
-            const meta = document.createElement('meta'); 
-            meta.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no');
-            meta.setAttribute('name', 'viewport');
-            document.getElementsByTagName('head')[0].appendChild(meta);
-            true;
-          `}
-        />
-      ) : (
-        webViewError ? renderError() : renderLoading()
-      )}
-
-      {/* Footer with Security Info */}
-      <View style={styles.footer}>
-        <View style={styles.securityBadge}>
-          <Ionicons name="lock-closed" size={16} color="#4CAF50" />
-          <Text style={styles.securityText}>Secure SSL Encryption • 256-bit Security</Text>
+        {/* Subtotal and Pay Button */}
+        <View style={styles.subtotalContainer}>
+          <Text style={styles.subtotalText}>Subtotal: ${subtotal.toFixed(2)}</Text>
+          <TouchableOpacity
+            style={[styles.payButton, paymentLoading && styles.disabledButton]}
+            onPress={handleInitiatePayment}
+            disabled={paymentLoading || !selectedAddress}
+          >
+            {paymentLoading ? (
+              <ActivityIndicator size="small" color="#f8f9fc" />
+            ) : (
+              <Text style={styles.payButtonText}>Pay Now</Text>
+            )}
+          </TouchableOpacity>
         </View>
       </View>
-    </SafeAreaView>
+    </PaperProvider>
   );
 };
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-  },
   container: {
     flex: 1,
-    backgroundColor: '#FAFAFA',
-  },
-  header: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: Platform.OS === 'ios' ? 10 : 20,
-    paddingBottom: 12,
-    zIndex: 10,
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    overflow: 'hidden',
-  },
-  headerContent: {
-    flex: 1,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginLeft: 16,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.1)',
-  },
-  headerTitle: {
-    color: 'white',
-    fontSize: 18,
-    fontFamily: 'NotoSans-SemiBold',
-    letterSpacing: 0.5,
-  },
-  securityIcons: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  securityIconSpacing: {
-    marginLeft: 12,
-  },
-  progressBar: {
-    height: 3,
-    backgroundColor: '#4CAF50',
-    position: 'absolute',
-    top: Platform.OS === 'ios' ? 88 : 68,
-    left: 0,
-    zIndex: 11,
-  },
-  summaryContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
-    marginTop: Platform.OS === 'ios' ? 80 : 60,
-  },
-  summaryLabel: {
-    color: '#555',
-    fontSize: 16,
-    fontFamily: 'NotoSans-Regular',
-  },
-  amountContainer: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-  },
-  currency: {
-    color: '#666',
-    fontSize: 14,
-    fontFamily: 'NotoSans-Regular',
-    marginRight: 4,
-  },
-  summaryAmount: {
-    color: '#2E7D32',
-    fontSize: 22,
-    fontFamily: 'NotoSans-Bold',
-  },
-  webview: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#f8f9fc',
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-  },
-  loadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.95)',
-    zIndex: 5,
-  },
-  loadingText: {
-    color: '#555',
-    fontSize: 16,
-    fontFamily: 'NotoSans-Regular',
-    marginTop: 20,
-    textAlign: 'center',
-    paddingHorizontal: 40,
-    lineHeight: 24,
+    backgroundColor: '#f8f9fc',
   },
   errorContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 30,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#f8f9fc',
+    padding: 16,
   },
-  errorIconContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: 'rgba(255, 82, 82, 0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  errorTitle: {
-    color: '#FF5252',
-    fontSize: 24,
-    fontFamily: 'NotoSans-Bold',
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  errorMessage: {
-    color: '#666',
+  errorText: {
     fontSize: 16,
+    color: '#ff4d4f',
+    textAlign: 'center',
+    marginBottom: 16,
     fontFamily: 'NotoSans-Regular',
-    textAlign: 'center',
-    lineHeight: 24,
-    marginBottom: 30,
-    paddingHorizontal: 20,
   },
-  invalidContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 30,
-    backgroundColor: '#FFFFFF',
-  },
-  invalidIconContainer: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: 'rgba(255, 82, 82, 0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 25,
-  },
-  invalidTitle: {
-    color: '#FF5252',
-    fontSize: 24,
-    fontFamily: 'NotoSans-Bold',
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  invalidMessage: {
-    color: '#666',
-    fontSize: 16,
-    fontFamily: 'NotoSans-Regular',
-    textAlign: 'center',
-    lineHeight: 24,
-    marginBottom: 30,
-    paddingHorizontal: 20,
-  },
-  buttonGroup: {
-    width: '100%',
-    maxWidth: 400,
-    paddingHorizontal: 20,
-  },
-  actionButton: {
-    paddingVertical: 15,
-    borderRadius: 8,
-    marginBottom: 15,
-    width: '100%',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  primaryButton: {
-    backgroundColor: '#4CAF50',
-  },
-  secondaryButton: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: '#4CAF50',
-  },
-  buttonText: {
-    color: 'white',
-    fontSize: 16,
-    fontFamily: 'NotoSans-SemiBold',
-  },
-  secondaryButtonText: {
-    color: '#4CAF50',
-  },
-  footer: {
+  retryButton: {
+    backgroundColor: '#607afb',
     paddingVertical: 12,
-    backgroundColor: '#FFFFFF',
-    borderTopWidth: 1,
-    borderTopColor: '#F0F0F0',
+    paddingHorizontal: 24,
+    borderRadius: 12,
   },
-  securityBadge: {
+  retryButtonText: {
+    color: '#f8f9fc',
+    fontSize: 16,
+    fontWeight: 'bold',
+    fontFamily: 'NotoSans-Regular',
+  },
+  header: {
     flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    paddingBottom: 8,
+    backgroundColor: '#f8f9fc',
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#0d0f1c',
+    flex: 1,
+    textAlign: 'center',
+    fontFamily: 'PlusJakartaSans-Regular',
+  },
+  headerPlaceholder: {
+    width: 24,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#0d0f1c',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    fontFamily: 'PlusJakartaSans-Regular',
+  },
+  cartList: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+  },
+  cartItem: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+    elevation: 2,
+  },
+  itemName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#0d0f1c',
+    fontFamily: 'PlusJakartaSans-Regular',
+  },
+  itemVariant: {
+    fontSize: 14,
+    color: '#0d0f1c',
+    marginTop: 4,
+    fontFamily: 'NotoSans-Regular',
+  },
+  itemPrice: {
+    fontSize: 14,
+    color: '#0d0f1c',
+    marginTop: 4,
+    fontFamily: 'NotoSans-Regular',
+  },
+  addressList: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+  },
+  addressItem: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+    elevation: 2,
+  },
+  selectedAddress: {
+    borderWidth: 2,
+    borderColor: '#607afb',
+  },
+  addressText: {
+    fontSize: 14,
+    color: '#0d0f1c',
+    fontFamily: 'NotoSans-Regular',
+  },
+  defaultText: {
+    fontSize: 12,
+    color: '#607afb',
+    marginTop: 4,
+    fontFamily: 'NotoSans-Regular',
+  },
+  emptyAddressContainer: {
+    padding: 16,
+    alignItems: 'center',
+  },
+  emptyText: {
+    fontSize: 16,
+    color: '#0d0f1c',
+    marginBottom: 16,
+    fontFamily: 'NotoSans-Regular',
+  },
+  addAddressButton: {
+    backgroundColor: '#607afb',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+  },
+  addAddressButtonText: {
+    color: '#f8f9fc',
+    fontSize: 16,
+    fontWeight: 'bold',
+    fontFamily: 'PlusJakartaSans-Regular',
+  },
+  subtotalContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#f8f9fc',
+    borderTopWidth: 1,
+    borderTopColor: '#e7ecf3',
+  },
+  subtotalText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#0d0f1c',
+    marginBottom: 12,
+    fontFamily: 'PlusJakartaSans-Regular',
+  },
+  payButton: {
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: '#607afb',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 16,
   },
-  securityText: {
-    color: '#666',
-    fontSize: 12,
-    fontFamily: 'NotoSans-Regular',
-    marginLeft: 6,
+  payButtonText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#f8f9fc',
+    fontFamily: 'PlusJakartaSans-Regular',
+  },
+  disabledButton: {
+    backgroundColor: '#e0e0e0',
+    opacity: 0.5,
+  },
+  webview: {
+    flex: 1,
   },
 });
 

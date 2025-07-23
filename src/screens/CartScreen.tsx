@@ -42,12 +42,12 @@ const CartScreen = () => {
           ...item,
           product: {
             ...item.product,
-            images: item.product.images.map((img) => ({
+            images: item.product.images?.map((img) => ({
               ...img,
               image: img.image.startsWith('/media')
                 ? `${IMAGE_BASE_URL}${img.image}`
                 : img.image,
-            })),
+            })) || [],
           },
         }));
         setCartItems(fixedItems);
@@ -75,6 +75,15 @@ const CartScreen = () => {
   const handleUpdateQuantity = async (itemId, newQuantity) => {
     if (newQuantity < 1) return;
     try {
+      const item = cartItems.find((item) => item.id === itemId);
+      if (!item) {
+        throw new Error('Cart item not found');
+      }
+      const availableStock = item.variant?.stock || item.product.stock;
+      if (newQuantity > availableStock) {
+        Alert.alert('Error', `Cannot add more. Only ${availableStock} in stock.`);
+        return;
+      }
       await updateCartItem(itemId, { quantity: newQuantity });
       setCartItems((prevItems) =>
         prevItems.map((item) =>
@@ -96,7 +105,11 @@ const CartScreen = () => {
         response: err.response?.data,
         status: err.response?.status,
       });
-      Alert.alert('Error', 'Failed to update quantity.');
+      const errorMessage =
+        err.response?.data?.quantity ||
+        err.response?.data?.detail ||
+        'Failed to update quantity. Please try again.';
+      Alert.alert('Error', errorMessage);
     }
   };
 
@@ -115,7 +128,9 @@ const CartScreen = () => {
         response: err.response?.data,
         status: err.response?.status,
       });
-      Alert.alert('Error', 'Failed to remove item.');
+      const errorMessage =
+        err.response?.data?.detail || 'Failed to remove item. Please try again.';
+      Alert.alert('Error', errorMessage);
     }
   };
 
@@ -136,6 +151,40 @@ const CartScreen = () => {
           onPress={() => {
             setError(null);
             setLoading(true);
+            // Re-run fetchCartItems
+            const fetchCartItems = async () => {
+              try {
+                const response = await getCartItems();
+                const fixedItems = response.data.map((item) => ({
+                  ...item,
+                  product: {
+                    ...item.product,
+                    images: item.product.images?.map((img) => ({
+                      ...img,
+                      image: img.image.startsWith('/media')
+                        ? `${IMAGE_BASE_URL}${img.image}`
+                        : img.image,
+                    })) || [],
+                  },
+                }));
+                setCartItems(fixedItems);
+                const total = fixedItems.reduce(
+                  (sum, item) => sum + parseFloat(item.product.price) * item.quantity,
+                  0
+                );
+                setSubtotal(total);
+                setLoading(false);
+              } catch (err) {
+                console.error('Fetch Cart Error:', {
+                  message: err.message,
+                  response: err.response?.data,
+                  status: err.response?.status,
+                });
+                setError('Failed to load cart. Please try again.');
+                setLoading(false);
+                Alert.alert('Error', 'Failed to load cart. Please check your connection.');
+              }
+            };
             fetchCartItems();
           }}
         >
@@ -155,18 +204,20 @@ const CartScreen = () => {
       <View style={styles.itemDetails}>
         <Text style={styles.itemName}>{item.product.name}</Text>
         <Text style={styles.itemVariant}>
-          Size: {item.variant.size}, Color: {item.variant.color}
+          Size: {item.variant?.size || 'N/A'}, Color: {item.variant?.color || 'N/A'}
         </Text>
         <Text style={styles.itemPrice}>
           ${parseFloat(item.product.price).toFixed(2)} x {item.quantity} = $
           {(parseFloat(item.product.price) * item.quantity).toFixed(2)}
         </Text>
         <Text style={styles.itemStock}>
-          {item.variant.stock > 0 ? `${item.variant.stock} in stock` : 'Out of stock'}
+          {item.variant?.stock > 0 || item.product.stock > 0
+            ? `${item.variant?.stock || item.product.stock} in stock`
+            : 'Out of stock'}
         </Text>
         <View style={styles.quantityContainer}>
           <TouchableOpacity
-            style={styles.quantityButton}
+            style={[styles.quantityButton, item.quantity <= 1 && styles.disabledButton]}
             onPress={() => handleUpdateQuantity(item.id, item.quantity - 1)}
             disabled={item.quantity <= 1}
           >
@@ -174,9 +225,13 @@ const CartScreen = () => {
           </TouchableOpacity>
           <Text style={styles.quantityText}>{item.quantity}</Text>
           <TouchableOpacity
-            style={styles.quantityButton}
+            style={[
+              styles.quantityButton,
+              item.quantity >= (item.variant?.stock || item.product.stock) &&
+                styles.disabledButton,
+            ]}
             onPress={() => handleUpdateQuantity(item.id, item.quantity + 1)}
-            disabled={item.quantity >= item.variant.stock}
+            disabled={item.quantity >= (item.variant?.stock || item.product.stock)}
           >
             <Text style={styles.quantityButtonText}>+</Text>
           </TouchableOpacity>
@@ -389,7 +444,7 @@ const styles = StyleSheet.create({
   },
   itemStock: {
     fontSize: 14,
-    color: itemStock => itemStock > 0 ? '#0d0f1c' : '#ff4d4f',
+    color: '#0d0f1c',
     marginTop: 4,
     fontFamily: 'NotoSans-Regular',
   },
@@ -405,6 +460,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#e6e9f4',
     borderRadius: 8,
+  },
+  disabledButton: {
+    backgroundColor: '#e0e0e0',
+    opacity: 0.5,
   },
   quantityButtonText: {
     fontSize: 18,

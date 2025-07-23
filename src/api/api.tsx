@@ -109,14 +109,13 @@ export const updateProfile = (data: any) =>
   api.put("/accounts/profile/", data);
 
 // --- SHIPPING ADDRESSES ---
-export const getShippingAddresses = () =>
-  api.get("/accounts/shipping-addresses/");
+export const getShippingAddresses = () => api.get("/accounts/addresses/");
 export const createShippingAddress = (data: any) =>
-  api.post("/accounts/shipping-addresses/", data);
+  api.post("/accounts/addresses/", data);
 export const updateShippingAddress = (id: number, data: any) =>
-  api.put(`/accounts/shipping-addresses/${id}/`, data);
+  api.put(`/accounts/addresses/${id}/`, data);
 export const deleteShippingAddress = (id: number) =>
-  api.delete(`/accounts/shipping-addresses/${id}/`);
+  api.delete(`/accounts/addresses/${id}/`);
 
 // --- PRODUCTS ---
 export const getProducts = () => api.get("/products/");
@@ -139,12 +138,16 @@ export const getCategories = async () => {
 };
 
 // --- CART & CART ITEMS ---
-export const getCart = () => api.get("/orders/carts/");
-export const addToCart = (data: any) => api.post("/orders/cart-items/", data);
-export const updateCartItem = (id: number, data: any) =>
-  api.put(`/orders/cart-items/${id}/`, data);
+export const getCartItems = () => api.get("/orders/cart/items/");
+
+export const addToCart = (data: { product_id: number; variant_id: number; quantity: number }) =>
+  api.post("/orders/cart/items/", data);
+
+export const updateCartItem = (id: number, data: { quantity: number }) =>
+  api.patch(`/orders/cart/items/${id}/`, data);
+
 export const deleteCartItem = (id: number) =>
-  api.delete(`/orders/cart-items/${id}/`);
+  api.delete(`/orders/cart/items/${id}/`);
 
 // --- COUPONS ---
 export const applyCoupon = (data: { code: string }) =>
@@ -155,8 +158,18 @@ export const getOrders = () => api.get("/orders/orders/");
 export const createOrder = (data: any) => api.post("/orders/orders/", data);
 
 // --- PAYMENTS ---
-export const initiatePayment = (data: any) =>
-  api.post("/orders/payment/initiate/", data);
+export const initiatePayment = async (data: { shipping_address_id: number }) => {
+  try {
+    const response = await api.post("/orders/payment/initiate/", data);
+    return response.data;
+  } catch (error: any) {
+    if (error.response) {
+      throw error.response.data;
+    } else {
+      throw { detail: "Network error or server not reachable." };
+    }
+  }
+};
 
 // --- NOTIFICATIONS ---
 export const sendOrderNotification = (orderId: number) =>

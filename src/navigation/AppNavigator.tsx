@@ -1,5 +1,3 @@
-// === 📁 src/navigation/AppNavigator.js ===
-
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -13,8 +11,12 @@ import VerifyEmailScreen from '../screens/VerifyEmailScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import HomeScreen from '../screens/HomeScreen';
 import ForgotPasswordScreen from '../screens/ForgotPasswordScreen';
-import CreatePostScreen from '../screens/CreatePostScreen'; // <-- Add this
-
+import CreatePostScreen from '../screens/CreatePostScreen';
+import CartScreen from '../screens/CartScreen';
+import CheckoutScreen from '../screens/CheckoutScreen';
+import AddAddressScreen from '../screens/AddAddressScreen';
+import ProductDetailScreen from '../screens/ProductDetailScreen';
+import OrderConfirmationScreen from '../screens/OrderConfirmationScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -33,8 +35,12 @@ const AppNavigator = () => {
           <Stack.Screen name="Profile" component={ProfileScreen} />
           <Stack.Screen name="Home" component={HomeScreen} />
           <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
-          <Stack.Screen name="CreatePost" component={CreatePostScreen} /> {/* <-- Add this */}
-
+          <Stack.Screen name="CreatePost" component={CreatePostScreen} />
+          <Stack.Screen name="Cart" component={CartScreen} />
+          <Stack.Screen name="Checkout" component={CheckoutScreen} />
+          <Stack.Screen name="AddAddress" component={AddAddressScreen} />
+          <Stack.Screen name="ProductDetail" component={ProductDetailScreen} />
+          <Stack.Screen name="OrderConfirmation" component={OrderConfirmationScreen} />
         </Stack.Navigator>
       </NavigationContainer>
     </SafeAreaProvider>

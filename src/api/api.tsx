@@ -184,6 +184,20 @@ export const initiatePayment = async (data: { shipping_address_id: number }) => 
     }
   }
 };
+// --- BANNERS ---
+export const getBanners = async () => {
+  try {
+    const response = await api.get("products/banners/");
+    return response;
+  } catch (error: any) {
+    if (error.response) {
+      throw error.response.data;
+    } else {
+      throw { detail: "Network error or server not reachable." };
+    }
+  }
+};
+
 
 // --- NOTIFICATIONS ---
 export const sendOrderNotification = (orderId: number) =>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,24 +9,30 @@ import {
   ActivityIndicator,
   Alert,
   RefreshControl,
+  FlatList,
+  Dimensions,
 } from 'react-native';
 import { useFonts } from 'expo-font';
 import { MaterialCommunityIcons, MaterialIcons, FontAwesome, Ionicons } from '@expo/vector-icons';
 import { PaperProvider } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
-import { getProducts, getCategories } from '../api/api';
+import { getProducts, getCategories, getBanners } from '../api/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const IMAGE_BASE_URL = 'http://192.168.100.40:8000'; // Match api.tsx
+const { width: screenWidth } = Dimensions.get('window');
 
 const HomeScreen = () => {
   const navigation = useNavigation();
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState(['All']);
+  const [banners, setBanners] = useState([]);
+  const [activeSlide, setActiveSlide] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [refreshing, setRefreshing] = useState(false);
+  const carouselRef = useRef(null);
 
   const [fontsLoaded] = useFonts({
     'NotoSans-Regular': require('../../assets/fonts/NotoSans-Regular.ttf'),
@@ -49,12 +55,14 @@ const HomeScreen = () => {
     try {
       setLoading(true);
       setError(null);
-      const [productsRes, categoriesRes] = await Promise.all([
+      const [productsRes, categoriesRes, bannersRes] = await Promise.all([
         getProducts(),
         getCategories(),
+        getBanners(),
       ]);
       console.log('Products Response:', JSON.stringify(productsRes.data, null, 2));
       console.log('Categories Response:', categoriesRes.data);
+      console.log('Banners Response:', JSON.stringify(bannersRes.data, null, 2));
 
       const fixedProducts = productsRes.data.map((product) => ({
         ...product,
@@ -67,7 +75,6 @@ const HomeScreen = () => {
       }));
       setProducts(fixedProducts);
 
-      // Ensure categoriesRes.data is an array of strings
       const categoryNames = Array.isArray(categoriesRes.data)
         ? categoriesRes.data.filter((name) => typeof name === 'string' && name)
         : [];
@@ -79,6 +86,20 @@ const HomeScreen = () => {
         Alert.alert('Warning', 'No categories available. Displaying all products.');
       }
 
+      const fixedBanners = bannersRes.data.flatMap((banner) =>
+        banner.images.map((img) => ({
+          ...img,
+          image: img.image.startsWith('/media')
+            ? `${IMAGE_BASE_URL}${img.image}`
+            : img.image,
+        }))
+      );
+      setBanners(fixedBanners);
+
+      if (fixedBanners.length === 0) {
+        console.warn('No banners found in response. Check banner data.');
+      }
+
       setLoading(false);
     } catch (err) {
       console.error('Fetch Error:', {
@@ -86,10 +107,58 @@ const HomeScreen = () => {
         response: err.response?.data,
         status: err.response?.status,
       });
-      setError('Failed to load products or categories. Please try again.');
+      setError('Failed to load data. Please try again.');
       setLoading(false);
       Alert.alert('Error', 'Failed to load data. Please check your connection.');
     }
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  // Auto-scroll carousel
+  useEffect(() => {
+    if (banners.length > 1) {
+      const interval = setInterval(() => {
+        if (carouselRef.current) {
+          const nextSlide = (activeSlide + 1) % banners.length;
+          carouselRef.current.scrollToIndex({
+            index: nextSlide,
+            animated: true,
+          });
+          setActiveSlide(nextSlide);
+        }
+      }, 3000); // Auto-scroll every 3 seconds
+      return () => clearInterval(interval);
+    }
+  }, [activeSlide, banners]);
+
+  const renderCarouselItem = ({ item }) => (
+    <View style={styles.carouselItem}>
+      <ImageBackground
+        source={{ uri: item.image }}
+        style={styles.bannerImage}
+        resizeMode="cover"
+      />
+    </View>
+  );
+
+  const renderPagination = () => {
+    if (banners.length <= 1) return null;
+    return (
+      <View style={styles.paginationContainer}>
+        {banners.map((_, index) => (
+          <View
+            key={index}
+            style={[
+              styles.dot,
+              activeSlide === index ? styles.activeDot : styles.inactiveDot,
+            ]}
+          />
+        ))}
+      </View>
+    );
   };
 
   const onRefresh = async () => {
@@ -100,10 +169,6 @@ const HomeScreen = () => {
       setRefreshing(false);
     }
   };
-
-  useEffect(() => {
-    fetchData();
-  }, []);
 
   if (!fontsLoaded || loading) {
     return (
@@ -161,12 +226,38 @@ const HomeScreen = () => {
           }
         >
           <View style={styles.bannerContainer}>
-            <ImageBackground
-              source={{
-                uri: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCGiF4z26bHoFkObBf1GL03PhN9etOYAujiak-UABu5wpIajMsST9g8YaqzDWvrBddZItzDYIkXb6NB3vZy2LmZui2WpqfRR_DdQMd7wy-gpmb03Wy54jIHNul0s6Hes7mBHMiMDlo9C1AwVUtxOT_xZItC5hv2phpriChO9Az7FdMdFBJxRM4VQdhJWMI1dTky-7v1JqkUbOvUfpN-iEDBpWZ6O_xFwkwg-bwcmtM1YyMoZngKT6Olzw6bldM8ZjhjNg5xNDpw25Xy',
-              }}
-              style={styles.bannerImage}
-            />
+            {banners.length > 0 ? (
+              <>
+                <FlatList
+                  ref={carouselRef}
+                  data={banners}
+                  renderItem={renderCarouselItem}
+                  horizontal
+                  pagingEnabled
+                  showsHorizontalScrollIndicator={false}
+                  onMomentumScrollEnd={(event) => {
+                    const slideIndex = Math.round(
+                      event.nativeEvent.contentOffset.x / (screenWidth - 32)
+                    );
+                    setActiveSlide(slideIndex);
+                  }}
+                  keyExtractor={(item) => item.id.toString()}
+                  getItemLayout={(data, index) => ({
+                    length: screenWidth - 32,
+                    offset: (screenWidth - 32) * index,
+                    index,
+                  })}
+                />
+                {renderPagination()}
+              </>
+            ) : (
+              <ImageBackground
+                source={{
+                  uri: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCGiF4z26bHoFkObBf1GL03PhN9etOYAujiak-UABu5wpIajMsST9g8YaqzDWvrBddZItzDYIkXb6NB3vZy2LmZui2WpqfRR_DdQMd7wy-gpmb03Wy54jIHNul0s6Hes7mBHMiMDlo9C1AwVUtxOT_xZItC5hv2phpriChO9Az7FdMdFBJxRM4VQdhJWMI1dTky-7v1JqkUbOvUfpN-iEDBpWZ6O_xFwkwg-bwcmtM1YyMoZngKT6Olzw6bldM8ZjhjNg5xNDpw25Xy',
+                }}
+                style={styles.bannerImage}
+              />
+            )}
           </View>
 
           {categories.length > 1 ? (
@@ -300,10 +391,35 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     borderRadius: 12,
     overflow: 'hidden',
+    marginTop: 16,
+  },
+  carouselItem: {
+    width: screenWidth - 32,
+    height: 218,
   },
   bannerImage: {
     width: '100%',
     height: 218,
+    borderRadius: 12,
+  },
+  paginationContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginHorizontal: 4,
+  },
+  activeDot: {
+    backgroundColor: '#0e141b',
+  },
+  inactiveDot: {
+    backgroundColor: '#0e141b',
+    opacity: 0.5,
   },
   categoriesContainer: {
     paddingVertical: 12,
@@ -379,7 +495,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 16,
     borderTopWidth: 1,
-    borderBottomColor: '#e7ecf3',
+    borderTopColor: '#e7ecf3',
     backgroundColor: '#f8fafc',
   },
   navItem: {

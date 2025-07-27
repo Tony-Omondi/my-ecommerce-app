@@ -1,7 +1,7 @@
 import axios from "axios";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const API_BASE_URL = "http://192.168.88.85:8000/api"; // Use http://10.0.2.2:8000 for Android Emulator
+const API_BASE_URL = "http://192.168.100.40:8000/api"; // Use http://10.0.2.2:8000 for Android Emulator
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -118,7 +118,20 @@ export const deleteShippingAddress = (id: number) =>
   api.delete(`/accounts/addresses/${id}/`);
 
 // --- PRODUCTS ---
-export const getProducts = () => api.get("/products/");
+export const getProducts = async (searchQuery: string = '') => {
+  try {
+    const response = await api.get("/products/", {
+      params: { search: searchQuery },
+    });
+    return response;
+  } catch (error: any) {
+    if (error.response) {
+      throw error.response.data;
+    } else {
+      throw { detail: "Network error or server not reachable." };
+    }
+  }
+};
 
 export const getProduct = (id: number) => api.get(`/products/${id}/`);
 
@@ -156,6 +169,7 @@ export const applyCoupon = (data: { code: string }) =>
 // --- ORDERS ---
 export const getOrders = () => api.get("/orders/orders/");
 export const createOrder = (data: any) => api.post("/orders/orders/", data);
+export const getOrderDetail = (orderId: number) => api.get(`/orders/orders/${orderId}/`);
 
 // --- PAYMENTS ---
 export const initiatePayment = async (data: { shipping_address_id: number }) => {

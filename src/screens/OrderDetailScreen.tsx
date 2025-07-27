@@ -8,15 +8,17 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { MaterialCommunityIcons, MaterialIcons, FontAwesome } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import moment from 'moment';
 import { PaperProvider } from 'react-native-paper';
 import { useFonts } from 'expo-font';
-import { getOrders } from '../api/api';
+import { getOrderDetail } from '../api/api';
 
-const OrdersScreen = () => {
+const OrderDetailScreen = () => {
   const navigation = useNavigation();
-  const [orders, setOrders] = useState([]);
+  const route = useRoute();
+  const { orderId } = route.params;
+  const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -25,19 +27,19 @@ const OrdersScreen = () => {
   });
 
   useEffect(() => {
-    const fetchOrders = async () => {
+    const fetchOrderDetail = async () => {
       try {
-        const response = await getOrders();
-        setOrders(response.data);
+        const response = await getOrderDetail(orderId);
+        setOrder(response.data);
         setLoading(false);
       } catch (err) {
-        console.error('Orders Fetch Error:', err.response?.data || err);
-        setError(err.response?.data?.detail || 'Failed to fetch orders');
+        console.error('Order Detail Fetch Error:', err.response?.data || err);
+        setError(err.response?.data?.detail || 'Failed to fetch order details');
         setLoading(false);
       }
     };
-    fetchOrders();
-  }, []);
+    fetchOrderDetail();
+  }, [orderId]);
 
   if (!fontsLoaded || loading) {
     return (
@@ -55,26 +57,6 @@ const OrdersScreen = () => {
     );
   }
 
-  const groupedOrders = orders.reduce((acc, order) => {
-    const date = new Date(order.created_at);
-    const today = new Date();
-    const yesterday = new Date(today);
-    yesterday.setDate(today.getDate() - 1);
-
-    let group;
-    if (date.toDateString() === today.toDateString()) {
-      group = 'Today';
-    } else if (date.toDateString() === yesterday.toDateString()) {
-      group = 'Yesterday';
-    } else {
-      group = moment(date).format('MMMM D, YYYY');
-    }
-
-    if (!acc[group]) acc[group] = [];
-    acc[group].push(order);
-    return acc;
-  }, {});
-
   return (
     <PaperProvider>
       <View style={styles.container}>
@@ -82,39 +64,56 @@ const OrdersScreen = () => {
           <TouchableOpacity onPress={() => navigation.goBack()}>
             <MaterialIcons name="arrow-back" size={24} color="#0e141b" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Your Orders</Text>
+          <Text style={styles.headerTitle}>Order #{order.order_id}</Text>
           <View style={{ width: 24 }} />
         </View>
 
         <ScrollView style={styles.scrollView}>
-          {Object.entries(groupedOrders).map(([date, orders]) => (
-            <View key={date}>
-              <Text style={styles.sectionTitle}>{date}</Text>
-              {orders.map((order) => (
-                <TouchableOpacity
-                  key={order.id}
-                  style={styles.orderItem}
-                  onPress={() => navigation.navigate('OrderDetail', { orderId: order.id })}
-                >
-                  <View style={styles.iconContainer}>
-                    <MaterialCommunityIcons name="clipboard-list" size={24} color="#0e141b" />
-                  </View>
-                  <View style={styles.orderContent}>
-                    <Text style={styles.orderTitle}>Order #{order.order_id}</Text>
-                    <Text style={styles.orderText}>Total: KSh {parseFloat(order.total_amount).toFixed(2)}</Text>
-                    <Text style={styles.orderText}>Status: {order.status}</Text>
-                    <Text style={styles.orderText}>Payment: {order.payment_status}</Text>
-                  </View>
-                  <Text style={styles.orderTime}>
-                    {moment(order.created_at).format('h:mm A')}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Order Details</Text>
+            <Text style={styles.detailText}>Order ID: {order.order_id}</Text>
+            <Text style={styles.detailText}>
+              Date: {moment(order.created_at).format('MMMM D, YYYY, h:mm A')}
+            </Text>
+            <Text style={styles.detailText}>Total: KSh {parseFloat(order.total_amount).toFixed(2)}</Text>
+            <Text style={styles.detailText}>Status: {order.status}</Text>
+            <Text style={styles.detailText}>Payment Status: {order.payment_status}</Text>
+          </View>
+
+          {order.shipping_address && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Shipping Address</Text>
+              <Text style={styles.detailText}>{order.shipping_address.address}</Text>
+              <Text style={styles.detailText}>
+                {order.shipping_address.city}, {order.shipping_address.county}
+              </Text>
             </View>
-          ))}
-          {orders.length === 0 && (
-            <Text style={styles.emptyText}>No orders available</Text>
           )}
+
+          {order.coupon && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Coupon</Text>
+              <Text style={styles.detailText}>Code: {order.coupon.coupon_code}</Text>
+            </View>
+          )}
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Items</Text>
+            {order.items && order.items.length > 0 ? (
+              order.items.map((item, index) => (
+                <View key={index} style={styles.itemContainer}>
+                  <Text style={styles.itemText}>
+                    {item.product.name} (Qty: {item.quantity})
+                  </Text>
+                  <Text style={styles.itemPrice}>
+                    KSh {parseFloat(item.product_price).toFixed(2)} each
+                  </Text>
+                </View>
+              ))
+            ) : (
+              <Text style={styles.emptyText}>No items in this order</Text>
+            )}
+          </View>
         </ScrollView>
 
         <View style={styles.bottomNav}>
@@ -178,50 +177,37 @@ const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
   },
+  section: {
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e7ecf3',
+  },
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     color: '#0e141b',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    paddingTop: 16,
+    marginBottom: 8,
     fontFamily: 'NotoSans-Regular',
   },
-  orderItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    backgroundColor: '#f8fafc',
-    minHeight: 72,
-  },
-  iconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    backgroundColor: '#e7ecf3',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  orderContent: {
-    flex: 1,
-  },
-  orderTitle: {
+  detailText: {
     fontSize: 16,
-    fontWeight: '500',
-    color: '#0e141b',
+    color: '#4e6e97',
     marginBottom: 4,
     fontFamily: 'NotoSans-Regular',
   },
-  orderText: {
-    fontSize: 14,
-    color: '#4e6e97',
+  itemContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+  },
+  itemText: {
+    fontSize: 16,
+    color: '#0e141b',
     fontFamily: 'NotoSans-Regular',
   },
-  orderTime: {
-    fontSize: 14,
+  itemPrice: {
+    fontSize: 16,
     color: '#4e6e97',
-    marginLeft: 16,
     fontFamily: 'NotoSans-Regular',
   },
   emptyText: {
@@ -260,4 +246,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default OrdersScreen;
+export default OrderDetailScreen;

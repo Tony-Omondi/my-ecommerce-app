@@ -7,10 +7,13 @@ import {
   StyleSheet,
   Alert,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import * as Font from 'expo-font';
+import { useFonts } from 'expo-font';
 import { verifyEmail, resendVerificationCode } from '../api/api';
+import { MaterialIcons } from '@expo/vector-icons';
 
 const VerifyEmailScreen = () => {
   const navigation = useNavigation();
@@ -19,54 +22,40 @@ const VerifyEmailScreen = () => {
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [fontsLoaded, setFontsLoaded] = useState(false);
 
-  useEffect(() => {
-    async function loadFonts() {
-      await Font.loadAsync({
-        'NotoSans-Regular': require('../../assets/fonts/SpaceMono-Regular.ttf'),
-      });
-      setFontsLoaded(true);
-    }
-    loadFonts();
-  }, []);
+  const [fontsLoaded] = useFonts({
+    'NotoSans-Regular': require('../../assets/fonts/NotoSans-Regular.ttf'),
+    'NotoSans-Bold': require('../../assets/fonts/NotoSans-Regular.ttf'),
+  });
 
   const handleVerifyEmail = async () => {
     if (!email) {
-      setError('Email is required. Please go back and try again.');
-      Alert.alert('Error', 'Email is required. Please go back and try again.');
+      const errorMsg = 'Email is required. Please go back and try again.';
+      setError(errorMsg);
+      Alert.alert('Error', errorMsg);
       return;
     }
     if (!code) {
-      setError('Verification code is required');
-      Alert.alert('Error', 'Verification code is required');
+      const errorMsg = 'Verification code is required';
+      setError(errorMsg);
+      Alert.alert('Error', errorMsg);
       return;
     }
 
     try {
       setLoading(true);
       const res = await verifyEmail({ email, code });
-      console.log('Verify Email Response:', res);
-      setLoading(false);
       Alert.alert('Success', res.message || 'Email verified successfully!');
       navigation.navigate('Login');
     } catch (err) {
-      setLoading(false);
-      console.error('Verify Email Error:', {
-        message: err.message,
-        response: err.response?.data,
-        status: err.response?.status,
-      });
-      let errorMessage = 'Verification failed. Please check the code.';
-      if (err.response?.data?.error) {
-        errorMessage = err.response.data.error;
-      } else if (err.response?.data) {
-        errorMessage = Object.values(err.response.data).flat().join(' ');
-      } else if (err.detail) {
-        errorMessage = err.detail;
-      }
+      console.error('Verify Email Error:', err);
+      const errorMessage = err.response?.data?.error || 
+                         Object.values(err.response?.data || {}).flat().join('\n') || 
+                         'Verification failed. Please check the code.';
       setError(errorMessage);
       Alert.alert('Verification Failed', errorMessage);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -78,155 +67,178 @@ const VerifyEmailScreen = () => {
     try {
       setLoading(true);
       const res = await resendVerificationCode({ email });
-      console.log('Resend Code Response:', res);
-      setLoading(false);
       Alert.alert('Success', res.message || 'A new code has been sent to your email.');
     } catch (err) {
-      setLoading(false);
-      console.error('Resend Code Error:', {
-        message: err.message,
-        response: err.response?.data,
-        status: err.response?.status,
-      });
-      let errorMessage = 'Could not resend verification code. Try again.';
-      if (err.response?.data?.error) {
-        errorMessage = err.response.data.error;
-      } else if (err.response?.data) {
-        errorMessage = Object.values(err.response.data).flat().join(' ');
-      }
+      console.error('Resend Code Error:', err);
+      const errorMessage = err.response?.data?.error || 
+                         Object.values(err.response?.data || {}).flat().join('\n') || 
+                         'Could not resend verification code. Try again.';
       Alert.alert('Error', errorMessage);
+    } finally {
+      setLoading(false);
     }
   };
 
   if (!fontsLoaded) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#94e0b2" />
+        <ActivityIndicator size="large" color="#1971e5" />
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Verify Your Email</Text>
-      <Text style={styles.instruction}>
-        Please enter the verification code sent to {email || 'your email'}.
-      </Text>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={styles.container}
+    >
+      <View style={styles.content}>
+        <Text style={styles.title}>Verify Your Email</Text>
+        <Text style={styles.subtitle}>
+          We've sent a 6-digit code to {'\n'}
+          <Text style={styles.emailText}>{email || 'your email'}</Text>
+        </Text>
 
-      <TextInput
-        placeholder="Verification Code"
-        style={[styles.input, error && styles.inputError]}
-        placeholderTextColor="#9bbfaa"
-        value={code}
-        onChangeText={(text) => {
-          setCode(text);
-          setError('');
-        }}
-        keyboardType="numeric"
-        maxLength={6}
-      />
+        <View style={styles.inputContainer}>
+          <MaterialIcons name="verified-user" size={20} color="#4e6e97" style={styles.inputIcon} />
+          <TextInput
+            placeholder="Enter verification code"
+            placeholderTextColor="#9bbfaa"
+            style={[styles.input, error && styles.inputError]}
+            value={code}
+            onChangeText={(text) => {
+              setCode(text);
+              setError('');
+            }}
+            keyboardType="number-pad"
+            maxLength={6}
+            autoFocus
+          />
+        </View>
 
-      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-      <TouchableOpacity
-        style={[
-          styles.button,
-          (!code || loading || !email) && { opacity: 0.5 },
-        ]}
-        disabled={!code || loading || !email}
-        onPress={handleVerifyEmail}
-      >
-        {loading ? (
-          <ActivityIndicator color="#141f18" />
-        ) : (
-          <Text style={styles.buttonText}>Verify</Text>
-        )}
-      </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.primaryButton, (!code || loading) && styles.disabledButton]}
+          disabled={!code || loading}
+          onPress={handleVerifyEmail}
+        >
+          {loading ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.primaryButtonText}>Verify Email</Text>
+          )}
+        </TouchableOpacity>
 
-      <TouchableOpacity
-        style={styles.linkButton}
-        onPress={handleResendCode}
-        disabled={loading || !email}
-      >
-        <Text style={styles.linkText}>Resend Code</Text>
-      </TouchableOpacity>
-    </View>
+        <View style={styles.resendContainer}>
+          <Text style={styles.resendText}>Didn't receive a code? </Text>
+          <TouchableOpacity
+            onPress={handleResendCode}
+            disabled={loading}
+          >
+            <Text style={styles.resendLink}>Resend</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </KeyboardAvoidingView>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#141f18',
+    backgroundColor: '#f8fafc',
+  },
+  content: {
+    flex: 1,
     justifyContent: 'center',
-    alignItems: 'center',
-    padding: 16,
+    padding: 24,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#141f18',
+    backgroundColor: '#f8fafc',
   },
   title: {
-    color: '#94e0b2',
     fontSize: 24,
     fontWeight: 'bold',
+    color: '#0e141b',
+    textAlign: 'center',
     marginBottom: 16,
+    fontFamily: 'NotoSans-Bold',
+  },
+  subtitle: {
+    fontSize: 16,
+    color: '#4e6e97',
+    textAlign: 'center',
+    marginBottom: 32,
+    lineHeight: 24,
     fontFamily: 'NotoSans-Regular',
   },
-  instruction: {
-    color: '#fff',
-    fontSize: 16,
-    textAlign: 'center',
-    marginBottom: 24,
-    fontFamily: 'NotoSans-Regular',
+  emailText: {
+    fontWeight: 'bold',
+    color: '#1971e5',
+  },
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#e7ecf3',
+  },
+  inputIcon: {
+    marginRight: 8,
   },
   input: {
-    width: '100%',
-    maxWidth: 480,
-    height: 56,
-    backgroundColor: '#2a4133',
-    color: '#fff',
-    borderRadius: 10,
-    paddingHorizontal: 16,
-    marginBottom: 12,
+    flex: 1,
+    height: 48,
+    color: '#0e141b',
     fontFamily: 'NotoSans-Regular',
+    fontSize: 16,
   },
   inputError: {
-    borderWidth: 1,
     borderColor: '#ff4d4f',
   },
   errorText: {
     color: '#ff4d4f',
     fontSize: 14,
-    marginBottom: 12,
+    marginBottom: 16,
+    textAlign: 'center',
     fontFamily: 'NotoSans-Regular',
   },
-  button: {
-    backgroundColor: '#94e0b2',
-    width: '100%',
-    maxWidth: 480,
+  primaryButton: {
+    backgroundColor: '#1971e5',
     height: 48,
     justifyContent: 'center',
     alignItems: 'center',
-    borderRadius: 24,
-    marginBottom: 12,
+    borderRadius: 8,
+    marginBottom: 16,
   },
-  buttonText: {
-    color: '#141f18',
-    fontWeight: 'bold',
+  disabledButton: {
+    opacity: 0.6,
+  },
+  primaryButtonText: {
+    color: '#fff',
     fontSize: 16,
-    letterSpacing: 0.15,
+    fontWeight: 'bold',
     fontFamily: 'NotoSans-Regular',
   },
-  linkButton: {
-    marginTop: 16,
+  resendContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginTop: 8,
   },
-  linkText: {
-    color: '#94e0b2',
-    fontSize: 16,
-    textDecorationLine: 'underline',
+  resendText: {
+    color: '#4e6e97',
+    fontFamily: 'NotoSans-Regular',
+  },
+  resendLink: {
+    color: '#1971e5',
+    fontWeight: 'bold',
     fontFamily: 'NotoSans-Regular',
   },
 });

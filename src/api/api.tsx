@@ -1,7 +1,7 @@
 import axios from "axios";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const API_BASE_URL = "http://192.168.100.40:8000/api"; // Use http://10.0.2.2:8000 for Android Emulator
+const API_BASE_URL = "http://3.82.235.244:8000/api"; // Use http://10.0.2.2:8000 for Android Emulator
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -56,13 +56,13 @@ export const verifyEmail = async (data: { email: string; code: string }) => {
 };
 
 export const resendVerificationCode = async (data: { email: string }) => {
-  try {
+  try {axios.create
     const response = await api.post("/accounts/forgot-password/", data);
     return response.data;
   } catch (error: any) {
     if (error.response) {
       throw error.response.data;
-    } else {
+    } else {axios.create
       throw { detail: "Network error or server not reachable." };
     }
   }

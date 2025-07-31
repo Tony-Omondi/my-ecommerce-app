@@ -7,34 +7,24 @@ import {
   StyleSheet,
   Image,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation } from '@react-navigation/native';
-import { login, googleLogin } from '../api/api';
-import * as Font from 'expo-font';
-import * as AuthSession from 'expo-auth-session';
-import { GOOGLE_CLIENT_ID } from '../utils/constants';
+import { login } from '../api/api';
+import { useFonts } from 'expo-font';
+import { MaterialIcons } from '@expo/vector-icons';
 
 const LoginScreen = () => {
   const navigation = useNavigation();
-  const [fontsLoaded, setFontsLoaded] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [errors, setErrors] = useState({ email: false, password: false });
+  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    async function loadFonts() {
-      await Font.loadAsync({
-        'NotoSans-Regular': require('../../assets/fonts/SpaceMono-Regular.ttf'),
-      });
-      setFontsLoaded(true);
-    }
-    loadFonts();
-  }, []);
-
-  if (!fontsLoaded) {
-    return null;
-  }
+  const [fontsLoaded] = useFonts({
+    'NotoSans-Regular': require('../../assets/fonts/NotoSans-Regular.ttf'),
+  });
 
   const validateEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
@@ -64,6 +54,7 @@ const LoginScreen = () => {
     }
 
     try {
+      setLoading(true);
       const res = await login({ email, password });
       await AsyncStorage.setItem('access_token', res.data.access);
       await AsyncStorage.setItem('refresh_token', res.data.refresh);
@@ -75,37 +66,18 @@ const LoginScreen = () => {
       let errorMessage = 'Check your credentials';
       if (err.response?.data?.detail) errorMessage = err.response.data.detail;
       Alert.alert('Login Failed', errorMessage);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleGoogleLogin = async () => {
-    try {
-      const redirectUri = AuthSession.makeRedirectUri({ useProxy: true });
-      const result = await AuthSession.startAsync({
-        authUrl:
-          `https://accounts.google.com/o/oauth2/v2/auth?` +
-          `&client_id=${GOOGLE_CLIENT_ID}` +
-          `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-          `&response_type=token` +
-          `&scope=profile%20email`,
-      });
-
-      if (result?.type === 'success') {
-        const idToken = result.params.access_token;
-        const res = await googleLogin(idToken);
-        await AsyncStorage.setItem('access_token', res.data.access);
-        await AsyncStorage.setItem('refresh_token', res.data.refresh);
-        await AsyncStorage.setItem('user_id', res.data.user.id.toString());
-        Alert.alert('Success', 'Logged in with Google!');
-        navigation.replace('Profile');
-      } else {
-        Alert.alert('Google Login Cancelled');
-      }
-    } catch (err) {
-      console.error('Google Login Error:', err);
-      Alert.alert('Google Login Failed', 'Please try again.');
-    }
-  };
+  if (!fontsLoaded) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#1971e5" />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -115,28 +87,36 @@ const LoginScreen = () => {
         resizeMode="contain"
       />
 
-      <TextInput
-        placeholder="Email"
-        placeholderTextColor="#9bbfaa"
-        style={[styles.input, errors.email && styles.inputError]}
-        value={email}
-        onChangeText={(text) => {
-          setEmail(text);
-          setErrors({ ...errors, email: false });
-        }}
-      />
+      <View style={styles.inputContainer}>
+        <MaterialIcons name="email" size={20} color="#4e6e97" style={styles.inputIcon} />
+        <TextInput
+          placeholder="Email"
+          placeholderTextColor="#9bbfaa"
+          style={[styles.input, errors.email && styles.inputError]}
+          value={email}
+          onChangeText={(text) => {
+            setEmail(text);
+            setErrors({ ...errors, email: false });
+          }}
+          keyboardType="email-address"
+          autoCapitalize="none"
+        />
+      </View>
 
-      <TextInput
-        placeholder="Password"
-        placeholderTextColor="#9bbfaa"
-        style={[styles.input, errors.password && styles.inputError]}
-        value={password}
-        onChangeText={(text) => {
-          setPassword(text);
-          setErrors({ ...errors, password: false });
-        }}
-        secureTextEntry
-      />
+      <View style={styles.inputContainer}>
+        <MaterialIcons name="lock" size={20} color="#4e6e97" style={styles.inputIcon} />
+        <TextInput
+          placeholder="Password"
+          placeholderTextColor="#9bbfaa"
+          style={[styles.input, errors.password && styles.inputError]}
+          value={password}
+          onChangeText={(text) => {
+            setPassword(text);
+            setErrors({ ...errors, password: false });
+          }}
+          secureTextEntry
+        />
+      </View>
 
       <TouchableOpacity
         style={styles.forgotPassword}
@@ -145,87 +125,107 @@ const LoginScreen = () => {
         <Text style={styles.forgotText}>Forgot Password?</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity style={styles.button} onPress={handleLogin}>
-        <Text style={styles.buttonText}>Login</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity
-        style={styles.button}
-        onPress={() => navigation.navigate('SignUp')}
+      <TouchableOpacity 
+        style={styles.button} 
+        onPress={handleLogin}
+        disabled={loading}
       >
-        <Text style={styles.buttonText}>Sign Up</Text>
+        {loading ? (
+          <ActivityIndicator color="#fff" />
+        ) : (
+          <Text style={styles.buttonText}>Login</Text>
+        )}
       </TouchableOpacity>
 
-      <TouchableOpacity style={styles.googleButton} onPress={handleGoogleLogin}>
-        <Text style={styles.buttonText}>Continue with Google</Text>
-      </TouchableOpacity>
+      <View style={styles.signupContainer}>
+        <Text style={styles.signupText}>Don't have an account? </Text>
+        <TouchableOpacity onPress={() => navigation.navigate('SignUp')}>
+          <Text style={styles.signupLink}>Sign Up</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 };
 
-export default LoginScreen;
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#141f18',
+    backgroundColor: '#f8fafc',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  loadingContainer: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 16,
+    backgroundColor: '#f8fafc',
   },
   logo: {
     width: 160,
     height: 160,
-    marginBottom: 24,
+    alignSelf: 'center',
+    marginBottom: 32,
+  },
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#e7ecf3',
+  },
+  inputIcon: {
+    marginRight: 8,
   },
   input: {
-    width: '100%',
-    maxWidth: 480,
-    height: 56,
-    backgroundColor: '#2a4133',
-    color: '#fff',
-    borderRadius: 10,
-    paddingHorizontal: 16,
-    marginBottom: 12,
+    flex: 1,
+    height: 48,
+    color: '#0e141b',
     fontFamily: 'NotoSans-Regular',
   },
   inputError: {
-    borderWidth: 1,
     borderColor: '#ff4d4f',
   },
   button: {
-    backgroundColor: '#94e0b2',
-    width: '100%',
-    maxWidth: 480,
+    backgroundColor: '#1971e5',
     height: 48,
     justifyContent: 'center',
     alignItems: 'center',
-    borderRadius: 24,
-    marginBottom: 12,
-  },
-  googleButton: {
-    backgroundColor: '#2a4133',
-    width: '100%',
-    maxWidth: 480,
-    height: 48,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderRadius: 24,
-    marginTop: 12,
+    borderRadius: 8,
+    marginTop: 8,
+    marginBottom: 16,
   },
   buttonText: {
     color: '#fff',
-    fontWeight: 'bold',
     fontSize: 16,
-    letterSpacing: 0.15,
+    fontWeight: 'bold',
+    fontFamily: 'NotoSans-Regular',
   },
   forgotPassword: {
     alignSelf: 'flex-end',
     marginBottom: 16,
   },
   forgotText: {
-    color: '#9bbfaa',
+    color: '#4e6e97',
     fontSize: 14,
-    textDecorationLine: 'underline',
+    fontFamily: 'NotoSans-Regular',
+  },
+  signupContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginTop: 16,
+  },
+  signupText: {
+    color: '#4e6e97',
+    fontFamily: 'NotoSans-Regular',
+  },
+  signupLink: {
+    color: '#1971e5',
+    fontWeight: 'bold',
+    fontFamily: 'NotoSans-Regular',
   },
 });
+
+export default LoginScreen;

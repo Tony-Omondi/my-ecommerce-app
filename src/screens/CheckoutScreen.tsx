@@ -9,13 +9,12 @@ import {
   Alert,
 } from 'react-native';
 import { useFonts } from 'expo-font';
-import { MaterialIcons } from '@expo/vector-icons';
+import { MaterialIcons, MaterialCommunityIcons, FontAwesome } from '@expo/vector-icons';
 import { PaperProvider } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
 import { getCartItems, initiatePayment, getShippingAddresses } from '../api/api';
 import WebView from 'react-native-webview';
 
-// Base URL for images
 const IMAGE_BASE_URL = 'http://192.168.88.85:8000'; // Use http://10.0.2.2:8000 for Android Emulator
 
 const CheckoutScreen = () => {
@@ -61,7 +60,7 @@ const CheckoutScreen = () => {
       // Fetch shipping addresses
       const addressResponse = await getShippingAddresses();
       setShippingAddresses(addressResponse.data);
-      const defaultAddress = addressResponse.data.find((addr) => addr.current_address);
+      const defaultAddress = addressResponse.data.find((addr) => addr.is_default);
       setSelectedAddress(defaultAddress || addressResponse.data[0] || null);
 
       setLoading(false);
@@ -79,7 +78,12 @@ const CheckoutScreen = () => {
 
   useEffect(() => {
     fetchData();
-  }, []);
+    // Refresh data when navigating back to this screen
+    const unsubscribe = navigation.addListener('focus', () => {
+      fetchData();
+    });
+    return unsubscribe;
+  }, [navigation]);
 
   const handleInitiatePayment = async () => {
     if (!cartItems.length) {
@@ -93,7 +97,7 @@ const CheckoutScreen = () => {
     try {
       setPaymentLoading(true);
       const response = await initiatePayment({ shipping_address_id: selectedAddress.id });
-      if (response.status && response.authorization_url) {
+      if (response.authorization_url) {
         setPaymentUrl(response.authorization_url);
       } else {
         throw new Error(response.message || 'Payment initialization failed.');
@@ -105,7 +109,6 @@ const CheckoutScreen = () => {
         detail: err.detail,
         response: err.response?.data,
         status: err.response?.status,
-        stack: err.stack,
       });
       Alert.alert('Error', errorMessage);
       setPaymentLoading(false);
@@ -136,21 +139,9 @@ const CheckoutScreen = () => {
     </View>
   );
 
-  const renderAddressItem = ({ item }) => (
-    <TouchableOpacity
-      style={[styles.addressItem, selectedAddress?.id === item.id && styles.selectedAddress]}
-      onPress={() => setSelectedAddress(item)}
-    >
-      <Text style={styles.addressText}>
-        {item.address}, {item.city}, {item.country}
-      </Text>
-      {item.current_address && <Text style={styles.defaultText}>Default</Text>}
-    </TouchableOpacity>
-  );
-
   if (!fontsLoaded || loading) {
     return (
-      <View style={styles.loadingContainer}>
+      <View style={styles.container}>
         <ActivityIndicator size="large" color="#607afb" />
       </View>
     );
@@ -198,49 +189,102 @@ const CheckoutScreen = () => {
           <View style={styles.headerPlaceholder} />
         </View>
 
-        {/* Cart Items */}
-        <Text style={styles.sectionTitle}>Order Summary</Text>
-        <FlatList
-          data={cartItems}
-          renderItem={renderCartItem}
-          keyExtractor={(item) => item.id.toString()}
-          contentContainerStyle={styles.cartList}
-        />
+        <View style={styles.scrollContainer}>
+          {/* Order Summary */}
+          <Text style={styles.sectionTitle}>Order Summary</Text>
+          <FlatList
+            data={cartItems}
+            renderItem={renderCartItem}
+            keyExtractor={(item) => item.id.toString()}
+            contentContainerStyle={styles.cartList}
+          />
 
-        {/* Shipping Address */}
-        <Text style={styles.sectionTitle}>Shipping Address</Text>
-        {shippingAddresses.length === 0 ? (
-          <View style={styles.emptyAddressContainer}>
-            <Text style={styles.emptyText}>No addresses found.</Text>
+          {/* Shipping Address */}
+          <Text style={styles.sectionTitle}>Shipping Address</Text>
+          {shippingAddresses.length === 0 ? (
+            <View style={styles.emptyAddressContainer}>
+              <Text style={styles.emptyText}>No addresses found.</Text>
+              <TouchableOpacity
+                style={styles.addAddressButton}
+                onPress={() => navigation.navigate('AddShippingAddress')}
+              >
+                <Text style={styles.addAddressButtonText}>Add Address</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={styles.addressContainer}>
+              {selectedAddress ? (
+                <View style={styles.selectedAddressCard}>
+                  <Text style={styles.addressTitle}>
+                    {selectedAddress.title} {selectedAddress.is_default && '(Default)'}
+                  </Text>
+                  <Text style={styles.addressText}>
+                    {selectedAddress.street_address}, {selectedAddress.city}
+                  </Text>
+                  <Text style={styles.addressText}>
+                    {selectedAddress.county} {selectedAddress.postal_code}
+                  </Text>
+                  <Text style={styles.addressText}>
+                    Phone: {selectedAddress.phone_number}
+                  </Text>
+                </View>
+              ) : (
+                <Text style={styles.emptyText}>No address selected</Text>
+              )}
+              <TouchableOpacity
+                style={styles.changeAddressButton}
+                onPress={() => navigation.navigate('AddShippingAddress')}
+              >
+                <Text style={styles.changeAddressButtonText}>
+                  {selectedAddress ? 'Change Address' : 'Select Address'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Subtotal and Pay Button */}
+          <View style={styles.subtotalContainer}>
+            <Text style={styles.subtotalText}>Subtotal: ${subtotal.toFixed(2)}</Text>
             <TouchableOpacity
-              style={styles.addAddressButton}
-              onPress={() => navigation.navigate('AddAddress')}
+              style={[styles.payButton, paymentLoading && styles.disabledButton]}
+              onPress={handleInitiatePayment}
+              disabled={paymentLoading || !selectedAddress}
             >
-              <Text style={styles.addAddressButtonText}>Add Address</Text>
+              {paymentLoading ? (
+                <ActivityIndicator size="small" color="#f8f9fc" />
+              ) : (
+                <Text style={styles.payButtonText}>Pay Now</Text>
+              )}
             </TouchableOpacity>
           </View>
-        ) : (
-          <FlatList
-            data={shippingAddresses}
-            renderItem={renderAddressItem}
-            keyExtractor={(item) => item.id.toString()}
-            contentContainerStyle={styles.addressList}
-          />
-        )}
+        </View>
 
-        {/* Subtotal and Pay Button */}
-        <View style={styles.subtotalContainer}>
-          <Text style={styles.subtotalText}>Subtotal: ${subtotal.toFixed(2)}</Text>
+        {/* Bottom Navigation */}
+        <View style={styles.bottomNav}>
           <TouchableOpacity
-            style={[styles.payButton, paymentLoading && styles.disabledButton]}
-            onPress={handleInitiatePayment}
-            disabled={paymentLoading || !selectedAddress}
+            style={styles.navItem}
+            onPress={() => navigation.navigate('Home')}
           >
-            {paymentLoading ? (
-              <ActivityIndicator size="small" color="#f8f9fc" />
-            ) : (
-              <Text style={styles.payButtonText}>Pay Now</Text>
-            )}
+            <MaterialCommunityIcons name="home-outline" size={24} color="#47569e" />
+            <Text style={styles.navText}>Home</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.navItem}
+            onPress={() => navigation.navigate('Cart')}
+          >
+            <MaterialCommunityIcons name="cart-outline" size={24} color="#47569e" />
+            <Text style={styles.navText}>Cart</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.navItem}
+            onPress={() => navigation.navigate('Notifications')}
+          >
+            <MaterialIcons name="notifications-none" size={24} color="#47569e" />
+            <Text style={styles.navText}>Notification</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.navItem}>
+            <FontAwesome name="user" size={20} color="#0d0f1c" />
+            <Text style={[styles.navText, { color: '#0d0f1c' }]}>Profile</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -253,11 +297,8 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f8f9fc',
   },
-  loadingContainer: {
+  scrollContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#f8f9fc',
   },
   errorContainer: {
     flex: 1,
@@ -268,22 +309,24 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize: 16,
-    color: '#ff4d4f',
+    color: '#ff0000',
     textAlign: 'center',
     marginBottom: 16,
     fontFamily: 'NotoSans-Regular',
   },
   retryButton: {
     backgroundColor: '#607afb',
-    paddingVertical: 12,
+    borderRadius: 24,
+    height: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
     paddingHorizontal: 24,
-    borderRadius: 12,
   },
   retryButtonText: {
     color: '#f8f9fc',
     fontSize: 16,
     fontWeight: 'bold',
-    fontFamily: 'NotoSans-Regular',
+    fontFamily: 'PlusJakartaSans-Regular',
   },
   header: {
     flexDirection: 'row',
@@ -309,7 +352,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#0d0f1c',
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingVertical: 12,
     fontFamily: 'PlusJakartaSans-Regular',
   },
   cartList: {
@@ -317,11 +360,12 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
   },
   cartItem: {
-    backgroundColor: '#fff',
+    backgroundColor: '#ffffff',
     borderRadius: 12,
-    padding: 12,
+    padding: 16,
     marginBottom: 12,
-    elevation: 2,
+    borderWidth: 1,
+    borderColor: '#e6e9f4',
   },
   itemName: {
     fontSize: 16,
@@ -331,7 +375,7 @@ const styles = StyleSheet.create({
   },
   itemVariant: {
     fontSize: 14,
-    color: '#0d0f1c',
+    color: '#47569e',
     marginTop: 4,
     fontFamily: 'NotoSans-Regular',
   },
@@ -341,31 +385,44 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontFamily: 'NotoSans-Regular',
   },
-  addressList: {
+  addressContainer: {
     paddingHorizontal: 16,
     paddingBottom: 16,
   },
-  addressItem: {
-    backgroundColor: '#fff',
+  selectedAddressCard: {
+    backgroundColor: '#ffffff',
     borderRadius: 12,
-    padding: 12,
+    padding: 16,
     marginBottom: 12,
-    elevation: 2,
-  },
-  selectedAddress: {
     borderWidth: 2,
     borderColor: '#607afb',
   },
+  addressTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#0d0f1c',
+    marginBottom: 4,
+    fontFamily: 'PlusJakartaSans-Regular',
+  },
   addressText: {
     fontSize: 14,
-    color: '#0d0f1c',
+    color: '#47569e',
+    marginBottom: 2,
     fontFamily: 'NotoSans-Regular',
   },
-  defaultText: {
-    fontSize: 12,
-    color: '#607afb',
-    marginTop: 4,
-    fontFamily: 'NotoSans-Regular',
+  changeAddressButton: {
+    backgroundColor: '#607afb',
+    borderRadius: 24,
+    height: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginVertical: 8,
+  },
+  changeAddressButtonText: {
+    color: '#f8f9fc',
+    fontSize: 16,
+    fontWeight: 'bold',
+    fontFamily: 'PlusJakartaSans-Regular',
   },
   emptyAddressContainer: {
     padding: 16,
@@ -373,15 +430,17 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 16,
-    color: '#0d0f1c',
+    color: '#47569e',
     marginBottom: 16,
     fontFamily: 'NotoSans-Regular',
   },
   addAddressButton: {
     backgroundColor: '#607afb',
-    paddingVertical: 12,
+    borderRadius: 24,
+    height: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
     paddingHorizontal: 24,
-    borderRadius: 12,
   },
   addAddressButtonText: {
     color: '#f8f9fc',
@@ -391,10 +450,10 @@ const styles = StyleSheet.create({
   },
   subtotalContainer: {
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 16,
     backgroundColor: '#f8f9fc',
     borderTopWidth: 1,
-    borderTopColor: '#e7ecf3',
+    borderTopColor: '#e6e9f4',
   },
   subtotalText: {
     fontSize: 18,
@@ -405,7 +464,7 @@ const styles = StyleSheet.create({
   },
   payButton: {
     height: 48,
-    borderRadius: 12,
+    borderRadius: 24,
     backgroundColor: '#607afb',
     justifyContent: 'center',
     alignItems: 'center',
@@ -417,11 +476,31 @@ const styles = StyleSheet.create({
     fontFamily: 'PlusJakartaSans-Regular',
   },
   disabledButton: {
-    backgroundColor: '#e0e0e0',
-    opacity: 0.5,
+    backgroundColor: '#a0b4ff',
+    opacity: 0.7,
   },
   webview: {
     flex: 1,
+  },
+  bottomNav: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e6e9f4',
+    backgroundColor: '#f8f9fc',
+  },
+  navItem: {
+    alignItems: 'center',
+    padding: 8,
+  },
+  navText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#47569e',
+    marginTop: 4,
+    fontFamily: 'NotoSans-Regular',
   },
 });
 

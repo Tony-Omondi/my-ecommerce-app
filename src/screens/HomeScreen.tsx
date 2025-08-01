@@ -208,7 +208,7 @@ const HomeScreen = () => {
       <View style={styles.container}>
         <View style={styles.header}>
           <MaterialIcons name="menu" size={24} color="#0e141b" />
-          <Text style={styles.headerTitle}>Hey Tony 👋🏾, Ready to Shop?</Text>
+          <Text style={styles.headerTitle}>WOZZA😂😂😂😂😂😂😂</Text>
           <View style={styles.headerIcons}>
             <TouchableOpacity onPress={() => navigation.navigate('Search')}>
               <FontAwesome name="search" size={20} color="#0e141b" style={styles.searchIcon} />
